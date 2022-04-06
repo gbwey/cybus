@@ -1,0 +1,7 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "cybus:lib"
+
+    - path: "./test"
+      component: "cybus:test:cybus-test"
