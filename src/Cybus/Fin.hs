@@ -42,8 +42,6 @@ module Cybus.Fin (
   readFin,
 
   -- * constructors
-
-  -- * miscellaneous
   mkFinC,
   mkFin,
   fin,

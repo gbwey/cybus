@@ -1,4 +1,4 @@
--- packages: *.cabal ../{pos,primus}
-packages: *.cabal 
+packages: *.cabal ../{pos,primus}
+-- packages: *.cabal 
 
 tests: True

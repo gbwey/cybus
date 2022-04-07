@@ -48,11 +48,10 @@ module Cybus.NatHelper (
   D10,
 
   -- * matrix helpers
-  NS,
-  Product1T,
+  ProductT,
   NN,
   NN',
-  Reverse1T,
+  ReverseT,
   ListTupleT,
 
   -- * list and nonempty conversions
@@ -82,7 +81,7 @@ import Primus.Fold
 import Primus.List
 import Primus.NonEmpty
 import Primus.One
-import qualified Primus.TypeLevel as TP (Cons1T, FailUnless)
+import qualified Primus.TypeLevel as TP (FailUnless)
 
 -- | get the factorial of a 'Nat'
 type FacT :: Nat -> Nat
@@ -142,29 +141,23 @@ type DiffTC i j n = (i <=! j, j <=! n)
 type DiffT :: Nat -> Nat -> Nat -> Nat
 type DiffT i j n = j GN.+ 1 GN.- i
 
--- | product of a type level nonempty list as a 'Nat'
-type Product1T :: NonEmpty Nat -> Nat
-type family Product1T ns where
-  Product1T (n ':| '[]) = n
-  Product1T (n ':| n1 ': ns) = n GN.* Product1T (n1 ':| ns)
+-- | reverse a type level list
+type ReverseT :: forall k. [k] -> [k]
+type family ReverseT ns where
+  ReverseT (n ': ns) = ReverseT' (n ': ns) '[]
 
--- | convert a list of 'Nat' into a nonempty list of 'Nat'
-type NS :: [Nat] -> NonEmpty Nat
-type family NS ns where
-  NS '[] = GL.TypeError ( 'GL.Text "NS: must have at least one Nat value for NonEmpty Nat")
-  NS (n ': '[]) = n ':| '[]
-  NS (n ': m ': ns) = TP.Cons1T n (NS (m ': ns))
+-- | used by 'ReverseT'
+type ReverseT' :: forall k. [k] -> [k] -> [k]
+type family ReverseT' ns ret where
+  ReverseT' '[] (r ': rs) = r ': rs
+  ReverseT' (n ': ns) ret = ReverseT' ns (n ': ret)
 
--- | used for reversing the indices of a matrix using type level list of nonempty indices
-type Reverse1T :: forall k. NonEmpty k -> NonEmpty k
-type family Reverse1T ns where
-  Reverse1T (n ':| ns) = Reverse1T' (n ': ns) '[]
-
--- | used by 'Reverse1T'
-type Reverse1T' :: forall k. [k] -> [k] -> NonEmpty k
-type family Reverse1T' ns ret where
-  Reverse1T' '[] (r ': rs) = r ':| rs
-  Reverse1T' (n ': ns) ret = Reverse1T' ns (n ': ret)
+-- | product of a type level list as a 'Nat'
+type ProductT :: [Nat] -> Nat
+type family ProductT ns where
+  ProductT '[] = GL.TypeError ('GL.Text "ProductT: empty indices")
+  ProductT '[n] = n
+  ProductT (n ': n1 ': ns) = n GN.* ProductT (n1 ': ns)
 
 -- | extracts the dimensions of a nested list
 type ValidateNestedListT :: Type -> Peano
@@ -245,16 +238,18 @@ type family PeanoToNatT n where
   PeanoToNatT ( 'S n) = 1 GN.+ PeanoToNatT n
 
 -- | convert a matrix index into nested lists
-type ListNST :: NonEmpty Nat -> Type -> Type
+type ListNST :: [Nat] -> Type -> Type
 type family ListNST ns a where
-  ListNST (_ ':| '[]) a = [a]
-  ListNST (_ ':| n1 ': ns) a = [ListNST (n1 ':| ns) a]
+  ListNST '[] _ = GL.TypeError ('GL.Text "ListNST: empty indices")
+  ListNST '[_] a = [a]
+  ListNST (_ ': n1 ': ns) a = [ListNST (n1 ': ns) a]
 
 -- | convert a matrix index into nested lists
-type NonEmptyNST :: NonEmpty Nat -> Type -> Type
+type NonEmptyNST :: [Nat] -> Type -> Type
 type family NonEmptyNST ns a where
-  NonEmptyNST (_ ':| '[]) a = NonEmpty a
-  NonEmptyNST (_ ':| n1 ': ns) a = NonEmpty (NonEmptyNST (n1 ':| ns) a)
+  NonEmptyNST '[] _ = GL.TypeError ('GL.Text "NonEmptyNST: empty indices")
+  NonEmptyNST '[_] a = NonEmpty a
+  NonEmptyNST (_ ': n1 ': ns) a = NonEmpty (NonEmptyNST (n1 ': ns) a)
 
 -- | convert a nested nonempty list into a nested list
 nestedNonEmptyToList :: forall ns a. NestedListC ns => NonEmptyNST ns a -> Either String (ListNST ns a)
@@ -265,7 +260,7 @@ nestedListToNonEmpty :: forall ns a. NestedListC ns => ListNST ns a -> Either St
 nestedListToNonEmpty = nestedListToNonEmptyC @ns @_ @a Proxy
 
 -- | methods for working with nested lists
-type NestedListC :: NonEmpty Nat -> Constraint
+type NestedListC :: [Nat] -> Constraint
 class NestedListC ns where
   -- | convert a nested list to a nested nonempty list
   nestedListToNonEmptyC :: proxy a -> ListNST ns a -> Either String (NonEmptyNST ns a)
@@ -275,7 +270,12 @@ class NestedListC ns where
 
   flattenNestedListC :: proxy a -> ListNST ns a -> Either String [a]
 
-instance PosT n => NestedListC (n ':| '[]) where
+instance GL.TypeError ('GL.Text "NestedListC '[]: empty indices") => NestedListC '[] where
+  nestedListToNonEmptyC = compileError "NestedListC '[]:nestedListToNonEmptyC"
+  nestedNonEmptyToListC = compileError "NestedListC '[]:nestedNonEmptyToListC"
+  flattenNestedListC = compileError "NestedListC '[]:flattenNestedListC"
+
+instance PosT n => NestedListC '[n] where
   nestedListToNonEmptyC _ = \case
     [] -> Left "nestedListToNonEmptyC 'SZ no data"
     x : xs -> lmsg "nestedListToNonEmptyC 'SZ" $ lengthExact1 (fromNP @n) (x :| xs)
@@ -284,20 +284,20 @@ instance PosT n => NestedListC (n ':| '[]) where
     [] -> Left "flattenNestedListC 'SZ no data"
     x : xs -> lmsg "flattenNestedListC 'SZ" $ lengthExact (fromN @n) (x : xs)
 
-instance (PosT n, NestedListC (n1 ':| ns)) => NestedListC (n ':| n1 ': ns) where
+instance (PosT n, NestedListC (n1 ': ns)) => NestedListC (n ': n1 ': ns) where
   nestedListToNonEmptyC p = \case
     [] -> Left "nestedListToNonEmptyC 'SS no data"
     x : xs -> do
       ys <- lmsg "nestedListToNonEmptyC 'SS" $ lengthExact1 (fromNP @n) (x :| xs)
-      traverse (nestedListToNonEmptyC @(n1 ':| ns) p) ys
+      traverse (nestedListToNonEmptyC @(n1 ': ns) p) ys
   nestedNonEmptyToListC p lst = do
     xs <- lmsg "nestedNonEmptyToListC 'SS" $ lengthExact1 (fromNP @n) lst
-    N.toList <$> traverse (nestedNonEmptyToListC @(n1 ':| ns) p) xs
+    N.toList <$> traverse (nestedNonEmptyToListC @(n1 ': ns) p) xs
   flattenNestedListC p = \case
     [] -> Left "flattenNestedListC 'SS no data"
     x : xs -> do
       ys <- lmsg "flattenNestedListC 'SS" $ lengthExact (fromN @n) (x : xs)
-      concat <$> traverse (flattenNestedListC @(n1 ':| ns) p) ys
+      concat <$> traverse (flattenNestedListC @(n1 ': ns) p) ys
 
 -- mapM_ (putStrLn . genListTupleT) [2..20]  -- to generate from two onwards
 
@@ -325,9 +325,9 @@ type family ListTupleT n a = result | result -> n a where
   ListTupleT 19 a = (a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a)
   ListTupleT 20 a = (a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a, a)
 
--- | generates a nonempty list of indices using each digit of the given 'Nat'
-type NN :: Nat -> NonEmpty Nat
-type NN n = NS (NN' '[] n)
+-- | generates a list of indices using each digit of the given 'Nat'
+type NN :: Nat -> [Nat]
+type NN n = NN' '[] n
 
 -- | generates a list of indices using the individual digits of the given 'Nat'
 type NN' :: [Nat] -> Nat -> [Nat]
@@ -336,41 +336,41 @@ type family NN' ns n where
   NN' ns n = NN' (GN.Mod n 10 ': ns) (GN.Div n 10)
 
 -- | matrix dimension of degree 1
-type D1 :: Nat -> NonEmpty Nat
-type D1 a = a ':| '[]
+type D1 :: Nat -> [Nat]
+type D1 a = '[a]
 
 -- | matrix dimension of degree 2
-type D2 :: Nat -> Nat -> NonEmpty Nat
-type D2 a b = a ':| '[b]
+type D2 :: Nat -> Nat -> [Nat]
+type D2 a b = '[a, b]
 
 -- | matrix dimension of degree 3
-type D3 :: Nat -> Nat -> Nat -> NonEmpty Nat
-type D3 a b c = a ':| '[b, c]
+type D3 :: Nat -> Nat -> Nat -> [Nat]
+type D3 a b c = '[a, b, c]
 
 -- | matrix dimension of degree 4
-type D4 :: Nat -> Nat -> Nat -> Nat -> NonEmpty Nat
-type D4 a b c d = a ':| '[b, c, d]
+type D4 :: Nat -> Nat -> Nat -> Nat -> [Nat]
+type D4 a b c d = '[a, b, c, d]
 
 -- | matrix dimension of degree 5
-type D5 :: Nat -> Nat -> Nat -> Nat -> Nat -> NonEmpty Nat
-type D5 a b c d e = a ':| '[b, c, d, e]
+type D5 :: Nat -> Nat -> Nat -> Nat -> Nat -> [Nat]
+type D5 a b c d e = '[a, b, c, d, e]
 
 -- | matrix dimension of degree 6
-type D6 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> NonEmpty Nat
-type D6 a b c d e f = a ':| '[b, c, d, e, f]
+type D6 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> [Nat]
+type D6 a b c d e f = '[a, b, c, d, e, f]
 
 -- | matrix dimension of degree 7
-type D7 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> NonEmpty Nat
-type D7 a b c d e f g = a ':| '[b, c, d, e, f, g]
+type D7 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> [Nat]
+type D7 a b c d e f g = '[a, b, c, d, e, f, g]
 
 -- | matrix dimension of degree 8
-type D8 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> NonEmpty Nat
-type D8 a b c d e f g h = a ':| '[b, c, d, e, f, g, h]
+type D8 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> [Nat]
+type D8 a b c d e f g h = '[a, b, c, d, e, f, g, h]
 
 -- | matrix dimension of degree 9
-type D9 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> NonEmpty Nat
-type D9 a b c d e f g h i = a ':| '[b, c, d, e, f, g, h, i]
+type D9 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> [Nat]
+type D9 a b c d e f g h i = '[a, b, c, d, e, f, g, h, i]
 
 -- | matrix dimension of degree 10
-type D10 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> NonEmpty Nat
-type D10 a b c d e f g h i j = a ':| '[b, c, d, e, f, g, h, i, j]
+type D10 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> [Nat]
+type D10 a b c d e f g h i j = '[a, b, c, d, e, f, g, h, i, j]

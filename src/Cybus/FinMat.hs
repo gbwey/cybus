@@ -26,15 +26,21 @@ Copyright   : (c) Grant Weyburne, 2022
 License     : BSD-3
 -}
 module Cybus.FinMat (
+  -- * core type
   type FinMat,
   fmPos,
   fmNS,
   pattern FinMat,
   pattern FinMatU,
+
+  -- * constructors
+  FinMatC (..),
   mkFinMat,
   mkFinMatC,
+  finMat,
   toFinMatFromPos,
-  FinMatC (..),
+
+  -- * conversions
   finMatToNonEmpty,
   nonEmptyToFinMat,
   nonEmptyToFinMat',
@@ -45,17 +51,15 @@ module Cybus.FinMat (
   readFinMat,
   showFinMat',
 
-  -- * constructors
-
   -- * miscellaneous
-  NSC (..),
+  NS (..),
   NSRangeC,
-  _finMatFin,
+  relPos,
   finMatFinSet,
   finMatFinGet,
-  relPos,
 
-  -- * lens into indices of matrix
+  -- * lens into the matrix indices
+  _finMatFin,
   _i1,
   _i2,
   _i3,
@@ -91,12 +95,12 @@ import Primus.Extra
 import Primus.Lens
 import Primus.NonEmpty
 import Primus.Num1
-import qualified Primus.TypeLevel as TP (Len1T, pnat)
+import qualified Primus.TypeLevel as TP (LengthT, pnat)
 import qualified Text.ParserCombinators.ReadP as P
 import qualified Text.ParserCombinators.ReadPrec as PC
 
 -- | definition of the indices of a matrix
-type FinMat :: NonEmpty Nat -> Type
+type FinMat :: [Nat] -> Type
 data FinMat ns = FinMatUnsafe !Int !(NonEmpty Pos)
   deriving stock (Eq, Ord, Generic, Generic1)
   deriving anyclass (NFData)
@@ -113,7 +117,7 @@ fmNS (FinMatUnsafe _ ns) = ns
 {-# COMPLETE FinMat #-}
 
 pattern FinMat ::
-  forall (ns :: NonEmpty Nat).
+  forall (ns :: [Nat]).
   Int ->
   NonEmpty Pos ->
   FinMat ns
@@ -121,10 +125,10 @@ pattern FinMat i ps <- FinMatUnsafe i ps
 
 {-# COMPLETE FinMatU #-}
 
--- | pattern synonym for validating the finmatrix before construction but uses an extra 'NSC' constraint to check "ns"
+-- | pattern synonym for validating the finmatrix before construction but uses an extra 'NS' constraint to check "ns"
 pattern FinMatU ::
-  forall (ns :: NonEmpty Nat).
-  (HasCallStack, NSC ns) =>
+  forall (ns :: [Nat]).
+  (HasCallStack, NS ns) =>
   Int ->
   NonEmpty Pos ->
   FinMat ns
@@ -143,7 +147,7 @@ mkFinMat i ps = lmsg "mkFinMat" $ do
       | otherwise -> pure (FinMatUnsafe i ps)
 
 -- | create a FinMat value level "i" and "ns" values and validate against expected "ns"
-mkFinMatC :: forall ns. NSC ns => Int -> NonEmpty Pos -> Either String (FinMat ns)
+mkFinMatC :: forall ns. NS ns => Int -> NonEmpty Pos -> Either String (FinMat ns)
 mkFinMatC i ps = do
   let ns = fromNSP @ns
   if ns == ps
@@ -151,37 +155,54 @@ mkFinMatC i ps = do
     else Left $ "mkFinMatC: invalid indices: typelevel " ++ show (fromPositives ns) ++ " /= " ++ show (fromPositives ps)
 
 -- | create a FinMat using a relative type level index
-toFinMatFromPos :: forall (i :: Nat) ns. (NSC ns, i <! Product1T ns) => FinMat ns
+toFinMatFromPos :: forall (i :: Nat) ns. (NS ns, i <! ProductT ns) => FinMat ns
 toFinMatFromPos = FinMatU (TP.pnat @i) (fromNSP @ns)
+
+-- | convenience function for conversion from 'Int' to 'FinMat'
+finMat :: forall ns. NS ns => Int -> Either String (FinMat ns)
+finMat i = mkFinMatC i (fromNSP @ns)
 
 -- | convert type level indices into a FinMat
 class FinMatC is ns where
   finMatC :: FinMat ns
 
-instance (NSC is, NSC ns, FinMatT is ns 1 is ns) => FinMatC is ns where
-  finMatC = frp $ nonEmptyToFinMat' (fromNSP @is) (fromNSP @ns)
+instance GL.TypeError ( 'GL.Text "FinMatC '[] '[]: empty index 'is' and 'ns'") => FinMatC '[] '[] where
+  finMatC = compileError "FinMatC '[] '[]: finMatC"
+instance GL.TypeError ( 'GL.Text "FinMatC '[] (n ': ns): empty index 'is'") => FinMatC '[] (n ': ns) where
+  finMatC = compileError "FinMatC '[] (n ': ns): finMatC"
+instance GL.TypeError ( 'GL.Text "FinMatC (i ': is) '[]: empty index 'ns'") => FinMatC (i ': is) '[] where
+  finMatC = compileError "FinMatC (i ': is) '[]: finMatC"
 
-type FinMatT :: NonEmpty Nat -> NonEmpty Nat -> Nat -> NonEmpty Nat -> NonEmpty Nat -> Constraint
+instance (is' ~ (i ': is), ns' ~ (n ': ns), NS is', NS ns', FinMatT is' ns' 1 is' ns') => FinMatC (i ': is) (n ': ns) where
+  finMatC = frp $ nonEmptyToFinMat' (fromNSP @is') (fromNSP @ns')
+
+type FinMatT :: [Nat] -> [Nat] -> Nat -> [Nat] -> [Nat] -> Constraint
 type family FinMatT is0 ns0 ind is ns where
-  FinMatT _is0 _ns0 ind (i ':| '[]) (n ':| '[]) =
+  FinMatT _is0 _ns0 ind '[] (_ ': _) =
+    GL.TypeError ( 'GL.Text "FinMatT: empty index 'is' " 'GL.:<>: 'GL.ShowType ind)
+  FinMatT _is0 _ns0 ind (_ ': _) '[] =
+    GL.TypeError ( 'GL.Text "FinMatT: empty index 'ns' " 'GL.:<>: 'GL.ShowType ind)
+  FinMatT _is0 _ns0 ind '[] '[] =
+    GL.TypeError ( 'GL.Text "FinMatT: empty index 'is' and 'ns' " 'GL.:<>: 'GL.ShowType ind)
+  FinMatT _is0 _ns0 ind '[i] '[n] =
     FinWithMessageT ( 'GL.Text " at index " 'GL.:<>: 'GL.ShowType ind) i n
-  FinMatT is0 ns0 ind (i ':| i' ': is) (n ':| n' ': ns) =
-    (FinWithMessageT ( 'GL.Text " at index=" 'GL.:<>: 'GL.ShowType ind) i n, FinMatT is0 ns0 (ind GN.+ 1) (i' ':| is) (n' ':| ns))
-  FinMatT is0 ns0 _ind (_ ':| _ ': _) (_ ':| '[]) =
+  FinMatT is0 ns0 ind (i ': i' ': is) (n ': n' ': ns) =
+    (FinWithMessageT ( 'GL.Text " at index=" 'GL.:<>: 'GL.ShowType ind) i n, FinMatT is0 ns0 (ind GN.+ 1) (i' ': is) (n' ': ns))
+  FinMatT is0 ns0 _ind (_ ': _ ': _) '[_] =
     GL.TypeError
       ( 'GL.Text "too many indices: length is > length ns:"
           'GL.:<>: 'GL.Text " found "
-          'GL.:<>: 'GL.ShowType (TP.Len1T is0)
+          'GL.:<>: 'GL.ShowType (TP.LengthT is0)
           'GL.:<>: 'GL.Text " expected "
-          'GL.:<>: 'GL.ShowType (TP.Len1T ns0)
+          'GL.:<>: 'GL.ShowType (TP.LengthT ns0)
       )
-  FinMatT is0 ns0 _ind (_ ':| '[]) (_ ':| _ ': _) =
+  FinMatT is0 ns0 _ind '[_] (_ ': _ ': _) =
     GL.TypeError
       ( 'GL.Text "not enough indices: length is < length ns: "
           'GL.:<>: 'GL.Text " found "
-          'GL.:<>: 'GL.ShowType (TP.Len1T is0)
+          'GL.:<>: 'GL.ShowType (TP.LengthT is0)
           'GL.:<>: 'GL.Text " expected "
-          'GL.:<>: 'GL.ShowType (TP.Len1T ns0)
+          'GL.:<>: 'GL.ShowType (TP.LengthT ns0)
       )
 
 -- | convert a FinMat into a list of indices
@@ -189,7 +210,7 @@ finMatToNonEmpty :: forall ns. FinMat ns -> NonEmpty Pos
 finMatToNonEmpty (FinMat i ns) = snd $ L.mapAccumR divModNextP i ns
 
 -- | try to convert a list of indices into a FinMat
-nonEmptyToFinMat :: forall ns. NSC ns => NonEmpty Pos -> Either String (FinMat ns)
+nonEmptyToFinMat :: forall ns. NS ns => NonEmpty Pos -> Either String (FinMat ns)
 nonEmptyToFinMat is = nonEmptyToFinMat' is (fromNSP @ns)
 
 -- | try to convert a list of indices into a FinMat
@@ -218,13 +239,13 @@ relPos xys =
         then programmError $ "relPos " ++ show ret
         else ret
 
-instance NSC ns => Monoid (FinMat ns) where
+instance NS ns => Monoid (FinMat ns) where
   mempty = minBound
 
 instance Semigroup (FinMat ns) where
   (<>) = max
 
-instance NSC ns => Num (FinMat ns) where
+instance NS ns => Num (FinMat ns) where
   (+) = forceRight "(+)" .@ withOp2 (+)
   (-) = forceRight "(-)" .@ withOp2 (-)
   (*) = forceRight "(*)" .@ withOp2 (*)
@@ -238,30 +259,30 @@ instance NSC ns => Num (FinMat ns) where
         ii <- integerToIntSafe i
         mkFinMatC ii (fromNSP @ns)
 
-instance NSC ns => Num1 (FinMat ns) where
+instance NS ns => Num1 (FinMat ns) where
   fromInteger1 (FinMat _ ns) i = do
     ii <- integerToIntSafe i
     mkFinMatC ii ns
 
-instance NSC ns => Enum (FinMat ns) where
+instance NS ns => Enum (FinMat ns) where
   toEnum = forceRight "Enum(FinMat ns):toEnum" . flip mkFinMatC (fromNSP @ns)
   fromEnum = fmPos
   enumFrom = boundedEnumFrom
   enumFromThen = boundedEnumFromThen
 
-instance NSC ns => Bounded (FinMat ns) where
+instance NS ns => Bounded (FinMat ns) where
   minBound = FinMatU 0 (fromNSP @ns)
   maxBound = FinMatU (unP (fromNSTotalP @ns) - 1) (fromNSP @ns)
 
-instance NSC ns => Read (FinMat ns) where
+instance NS ns => Read (FinMat ns) where
   readPrec = PC.readP_to_Prec (const readFinMatP)
 
 -- | reader for 'FinMat'
-readFinMat :: NSC ns => ReadS (FinMat ns)
+readFinMat :: NS ns => ReadS (FinMat ns)
 readFinMat = P.readP_to_S readFinMatP
 
 -- | reader for 'showFin'
-readFinMatP :: forall ns. NSC ns => P.ReadP (FinMat ns)
+readFinMatP :: forall ns. NS ns => P.ReadP (FinMat ns)
 readFinMatP = do
   P.skipSpaces
   (i, ns) <- (,) <$> pInt <* P.char '@' <*> pPositives '{' '}'
@@ -283,19 +304,20 @@ showFinMat' w@(FinMat i ns) =
 instance Show (FinMat ns) where
   show = showFinMat
 
--- | constrain i within the size of the indices ie "i >= 1 && i <= Length ns"
-type NSRangeC :: Peano -> NonEmpty Nat -> Constraint
+-- | constrain i within the size of the indices ie "i >= 1 && i <= LengthT ns"
+type NSRangeC :: Peano -> [Nat] -> Constraint
 class NSRangeC i ns
 
-instance NSRangeC ( 'S 'Z) (n ':| ns)
-instance NSRangeC ( 'S i) (m ':| ns) => NSRangeC ( 'S ( 'S i)) (n ':| m ': ns)
+instance GL.TypeError ('GL.Text "NSRangeC '[]: empty indices") => NSRangeC p '[]
+instance NSRangeC ( 'S 'Z) (n ': ns)
+instance NSRangeC ( 'S i) (m ': ns) => NSRangeC ( 'S ( 'S i)) (n ': m ': ns)
 instance
   GL.TypeError ( 'GL.Text "NSRangeC: index is larger than the number of matrix indices ns") =>
-  NSRangeC ( 'S ( 'S i)) (n ':| '[])
+  NSRangeC ( 'S ( 'S i)) '[n]
 
 instance
   GL.TypeError ( 'GL.Text "NSRangeC: zero is not a valid index: index must be one or greater") =>
-  NSRangeC 'Z (n ':| ns)
+  NSRangeC 'Z (n ': ns)
 
 -- | a lens for accessing the "i" index in a indices of FinMat
 _finMatFin ::
@@ -335,41 +357,41 @@ finMatFinGet fm@(FinMat _ ns) =
         (Just p, Just n) -> frp $ mkFin p n
 
 -- | lens for index 1
-_i1 :: Lens' (FinMat (n ':| ns)) (Fin n)
+_i1 :: Lens' (FinMat (n ': ns)) (Fin n)
 _i1 = _finMatFin @1
 
 -- | lens for index 2
-_i2 :: Lens' (FinMat (n1 ':| n ': ns)) (Fin n)
+_i2 :: Lens' (FinMat (n1 ': n ': ns)) (Fin n)
 _i2 = _finMatFin @2
 
 -- | lens for index 3
-_i3 :: Lens' (FinMat (n1 ':| n2 ': n ': ns)) (Fin n)
+_i3 :: Lens' (FinMat (n1 ': n2 ': n ': ns)) (Fin n)
 _i3 = _finMatFin @3
 
 -- | lens for index 4
-_i4 :: Lens' (FinMat (n1 ':| n2 ': n3 ': n ': ns)) (Fin n)
+_i4 :: Lens' (FinMat (n1 ': n2 ': n3 ': n ': ns)) (Fin n)
 _i4 = _finMatFin @4
 
 -- | lens for index 5
-_i5 :: Lens' (FinMat (n1 ':| n2 ': n3 ': n4 ': n ': ns)) (Fin n)
+_i5 :: Lens' (FinMat (n1 ': n2 ': n3 ': n4 ': n ': ns)) (Fin n)
 _i5 = _finMatFin @5
 
 -- | lens for index 6
-_i6 :: Lens' (FinMat (n1 ':| n2 ': n3 ': n4 ': n5 ': n ': ns)) (Fin n)
+_i6 :: Lens' (FinMat (n1 ': n2 ': n3 ': n4 ': n5 ': n ': ns)) (Fin n)
 _i6 = _finMatFin @6
 
 -- | lens for index 7
-_i7 :: Lens' (FinMat (n1 ':| n2 ': n3 ': n4 ': n5 ': n6 ': n ': ns)) (Fin n)
+_i7 :: Lens' (FinMat (n1 ': n2 ': n3 ': n4 ': n5 ': n6 ': n ': ns)) (Fin n)
 _i7 = _finMatFin @7
 
 -- | lens for index 8
-_i8 :: Lens' (FinMat (n1 ':| n2 ': n3 ': n4 ': n5 ': n6 ': n7 ': n ': ns)) (Fin n)
+_i8 :: Lens' (FinMat (n1 ': n2 ': n3 ': n4 ': n5 ': n6 ': n7 ': n ': ns)) (Fin n)
 _i8 = _finMatFin @8
 
 -- | lens for index 9
-_i9 :: Lens' (FinMat (n1 ':| n2 ': n3 ': n4 ': n5 ': n6 ': n7 ': n8 ': n ': ns)) (Fin n)
+_i9 :: Lens' (FinMat (n1 ': n2 ': n3 ': n4 ': n5 ': n6 ': n7 ': n8 ': n ': ns)) (Fin n)
 _i9 = _finMatFin @9
 
 -- | lens for index 10
-_i10 :: Lens' (FinMat (n1 ':| n2 ': n3 ': n4 ': n5 ': n6 ': n7 ': n8 ': n9 ': n ': ns)) (Fin n)
+_i10 :: Lens' (FinMat (n1 ': n2 ': n3 ': n4 ': n5 ': n6 ': n7 ': n8 ': n9 ': n ': ns)) (Fin n)
 _i10 = _finMatFin @10

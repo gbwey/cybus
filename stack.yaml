@@ -4,9 +4,9 @@ packages:
 - .
 
 extra-deps:
-# - ../pos
-- pos-0.1.0.0@sha256:3bddb0d75bd93137b0507f11cbb731c9695227dbb641d108e15cc41f71aa7a0e,1712
-# - ../primus
-- primus-0.1.0.0@sha256:2071d65d9e10e03ca728d03dac411c09cdf3346a005ace8b1f1b1e324159f126,2495
+- ../pos
+- ../primus
+# - pos-0.2.0.0
+# - primus-0.2.0.0
 
 
