@@ -285,7 +285,8 @@ readFinMat = P.readP_to_S readFinMatP
 readFinMatP :: forall ns. NS ns => P.ReadP (FinMat ns)
 readFinMatP = do
   P.skipSpaces
-  (i, ns) <- (,) <$> pInt <* P.char '@' <*> pPositives '{' '}'
+  _ <- P.string "FinMat@"
+  (i, ns) <- (,) <$> pInt <*> pPositives '{' '}'
   either (const P.pfail) pure $ mkFinMatC @ns i ns
 
 neToString :: NonEmpty Pos -> String
@@ -294,12 +295,12 @@ neToString = L.intercalate "," . map show . fromPositives
 -- | pretty print FinMat
 showFinMat :: FinMat ns -> String
 showFinMat (FinMat i ns) =
-  show i ++ "@{" ++ neToString ns ++ "}"
+  "FinMat@" ++ show i ++ "{" ++ neToString ns ++ "}"
 
 -- | more detailed pretty print FinMat
 showFinMat' :: forall ns. FinMat ns -> String
 showFinMat' w@(FinMat i ns) =
-  show i ++ "@{" ++ neToString (finMatToNonEmpty w) ++ "|" ++ neToString ns ++ "}"
+  "FinMat@" ++ show i ++ "{" ++ neToString (finMatToNonEmpty w) ++ "|" ++ neToString ns ++ "}"
 
 instance Show (FinMat ns) where
   show = showFinMat

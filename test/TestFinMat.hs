@@ -214,7 +214,7 @@ suite =
               N.last xs @?= maxBound
     , testCase "showFinMat" $
         map showFinMat [FinMatU @'[2, 3, 5] 0 (_2P :| [_3P, _5P]), toEnum 5 ..]
-          @?= ["0@{2,3,5}", "5@{2,3,5}", "10@{2,3,5}", "15@{2,3,5}", "20@{2,3,5}", "25@{2,3,5}"]
+          @?= ["FinMat@0{2,3,5}", "FinMat@5{2,3,5}", "FinMat@10{2,3,5}", "FinMat@15{2,3,5}", "FinMat@20{2,3,5}", "FinMat@25{2,3,5}"]
     , testCase "nonEmptyToFinMat'" $
         nonEmptyToFinMat' (_1P :| [_4P, _3P]) (_1P :| [_3P, _4P])
           @?= Left "nonEmptyToFinMat:These es=outofbounds (_4P,_3P) as=(_1P,_1P) :| [(_3P,_4P)]"
@@ -370,45 +370,45 @@ suite =
     , testCase "relPos" $
         relPos ((_4P, _7P) :| [(_3P, _5P), (_2P, _5P)]) @?= (_P @175, 86)
     , testCase "readFinMat" $
-        readFinMat @'[7, 3, 3] "5@{7,3,3}xyz" @?= [(finMatC @'[1, 2, 3] @'[7, 3, 3], "xyz")]
+        readFinMat @'[7, 3, 3] "FinMat@5{7,3,3}xyz" @?= [(finMatC @'[1, 2, 3] @'[7, 3, 3], "xyz")]
     , testCase "readFinMat" $
         let m = finMatC @'[1, 2, 3] @'[7, 3, 3]
          in readFinMat @'[7, 3, 3] (show m ++ "  ") @?= [(m, "  ")]
     , testCase "readFinMat" $
-        readFinMat @'[7, 3, 3] "6@{1,2,3}xyz" @?= []
+        readFinMat @'[7, 3, 3] "FinMat@6{1,2,3}xyz" @?= []
     , testCase "readFinMat" $
-        readFinMat @'[1, 2, 3] "         4@{     1,             2,   3}xy"
+        readFinMat @'[1, 2, 3] "   FinMat@4{     1,             2,   3}xy"
           @?= [(FinMatU @'[1, 2, 3] 4 (_1P :| [_2P, _3P]), "xy")]
     , testCase "showFinMat'" $
         showFinMat' (finMatC @'[2, 3, 5] @'[4, 4, 6])
-          @?= "40@{2,3,5|4,4,6}"
+          @?= "FinMat@40{2,3,5|4,4,6}"
     , testCase "showFinMat'" $
         showFinMat' (finMatC @'[1] @'[1])
-          @?= "0@{1|1}"
+          @?= "FinMat@0{1|1}"
     , testCase "showFinMat'" $
         showFinMat' (finMatC @(NN 123) @(NN 234))
-          @?= "6@{1,2,3|2,3,4}"
+          @?= "FinMat@6{1,2,3|2,3,4}"
     , testCase "showFinMat'" $
         showFinMat' (finMatC @(NN 111) @(NN 234))
-          @?= "0@{1,1,1|2,3,4}"
+          @?= "FinMat@0{1,1,1|2,3,4}"
     , testCase "showFinMat'" $
         showFinMat' (finMatC @(NN 114) @(NN 234))
-          @?= "3@{1,1,4|2,3,4}"
+          @?= "FinMat@3{1,1,4|2,3,4}"
     , testCase "showFinMat'" $
         showFinMat' (finMatC @(NN 9) @(NN 9))
-          @?= "8@{9|9}"
+          @?= "FinMat@8{9|9}"
     , testCase "showFinMat" $
         showFinMat (finMatC @'[1] @'[1])
-          @?= "0@{1}"
+          @?= "FinMat@0{1}"
     , testCase "showFinMat" $
         showFinMat (finMatC @'[1] @'[10])
-          @?= "0@{10}"
+          @?= "FinMat@0{10}"
     , testCase "showFinMat" $
         showFinMat (finMatC @'[10] @'[10])
-          @?= "9@{10}"
+          @?= "FinMat@9{10}"
     , testCase "showFinMat" $
         showFinMat (finMatC @'[4] @'[10])
-          @?= "3@{10}"
+          @?= "FinMat@3{10}"
     , testCase "fromInteger1" $
         fromInteger1 (minBound @(FinMat '[2, 3, 4])) 0
           @?= Right (FinMatU @'[2, 3, 4] 0 (_2P :| [_3P, _4P]))
