@@ -1,5 +1,8 @@
 {-# OPTIONS -Wno-orphans #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -7,6 +10,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 module TestMat where
 
@@ -40,6 +44,9 @@ import "checkers" Test.QuickCheck.Classes
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Test.Tasty.QuickCheck as TQ
+import Unsafe.Coerce
+import qualified GHC.TypeNats as GN
+import Data.Proxy
 
 instance (NS ns, Arbitrary a) => Arbitrary (Mat ns a) where
   arbitrary = sequenceA $ mat @ns (repeat arbitrary)
@@ -126,16 +133,16 @@ suite =
         matToNestedListC (fmap (show . succ) m35)
           @?= [["2", "3", "4", "5", "6"], ["7", "8", "9", "10", "11"], ["12", "13", "14", "15", "16"]]
     , testCase "totuple" $
-        toTupleC (mat' @'[2, 3, 2] [1 :: Int .. 12])
+        toTupleC (mat' @'[2, 3, 2] @Int [1 .. 12])
           @?= (((1, 2), (3, 4), (5, 6)), ((7, 8), (9, 10), (11, 12)))
     , testCase "fromtuple" $
         fromTupleC (((1, 2), (3, 4), (5, 6)), ((7, 8), (9, 10), (11, 12)))
-          @?= mat' @'[2, 3, 2] [1 :: Int .. 12]
+          @?= mat' @'[2, 3, 2] @Int [1 .. 12]
     , testCase "change row" $
-        (mat' @'[3, 4] [1 :: Int .. 12] & ixSlice @'[2, 3] .~ 999)
+        (mat' @'[3, 4] @Int [1 .. 12] & ixSlice @'[2, 3] .~ 999)
           @?= mat' @'[3, 4] [1, 2, 3, 4, 5, 6, 999, 8, 9, 10, 11, 12]
     , testCase "change row" $
-        (mat' @'[3, 4] [1 :: Int .. 12] & ixSlice @'[1] *~ 999)
+        (mat' @'[3, 4] @Int [1 .. 12] & ixSlice @'[1] *~ 999)
           @?= mat' @'[3, 4] [999, 1998, 2997, 3996, 5, 6, 7, 8, 9, 10, 11, 12]
     , testCase "change row" $
         m345 ^. ixSlice @'[2, 3]
@@ -144,16 +151,16 @@ suite =
         (m35 & ixSlice @'[2] . traverse *~ 100)
           @?= mat' @'[3, 5] [1, 2, 3, 4, 5, 600, 700, 800, 900, 1000, 11, 12, 13, 14, 15]
     , testCase "change row" $
-        (mat' @'[2, 1, 2, 3, 4] [1 :: Int .. 48] & ixSlice @'[2, 1, 1] . traverse *~ 100)
+        (mat' @'[2, 1, 2, 3, 4] @Int [1 .. 48] & ixSlice @'[2, 1, 1] . traverse *~ 100)
           @?= mat' @'[2, 1, 2, 3, 4] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 3200, 3300, 3400, 3500, 3600, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48]
     , testCase "change row" $
         m345 ^. ixSlice @'[2]
           @?= mat' @'[4, 5] ['U' .. 'h']
     , testCase "not as useful: nests all stuff" $
-        fmap sum (matToNestedVecC @'[2, 3] (mat' [1 :: Int .. 6]))
+        fmap sum (matToNestedVecC @'[2, 3] (mat' @_ @Int [1 .. 6]))
           @?= 6 .| 15
     , testCase "mapLeaf: change the lowest rows into lists" $
-        mapLeaf (const sum) (mat' @'[4, 3] [1 :: Int .. 12])
+        mapLeaf (const sum) (mat' @'[4, 3] @Int [1 .. 12])
           @?= mat' @'[4] [6, 15, 24, 33]
     , testCase "mapLeafSimple" $
         mapLeafSimple (fmap . (,) . fmPos) (gen' @(NN 43) id)
@@ -174,19 +181,19 @@ suite =
         foldMapLeafR (\i m -> [(fmPos i, sum m, toList m)]) (mm @(NN 234))
           @?= [(20, 90, [21, 22, 23, 24]), (16, 74, [17, 18, 19, 20]), (12, 58, [13, 14, 15, 16]), (8, 42, [9, 10, 11, 12]), (4, 26, [5, 6, 7, 8]), (0, 10, [1, 2, 3, 4])]
     , testCase "addition" $
-        mat' @'[2, 3] [1 .. 6] + mat' [100 :: Int .. 105]
+        mat' @'[2, 3] @Int [1 .. 6] + mat' [100 .. 105]
           @?= mat' [101, 103, 105, 107, 109, 111]
     , testCase "multiplication" $
-        mat' @'[2, 3] [1 .. 6] * mat' [100 :: Int .. 105]
+        mat' @'[2, 3] @Int [1 .. 6] * mat' [100 .. 105]
           @?= mat' [100, 202, 306, 412, 520, 630] -- note: have to use mat' for inference to work
     , testCase "transpose" $
-        transposeMat (mat' @'[2, 3] [1 :: Int .. 6])
+        transposeMat (mat' @'[2, 3] @Int [1 .. 6])
           @?= mat' [1, 4, 2, 5, 3, 6]
     , testCase "transpose iso" $
         transposeMat (transposeMat m345)
           @?= m345
     , testCase "diagonal" $
-        diagonal (mat' @'[3, 3, 4] [1 :: Int .. 36])
+        diagonal (mat' @'[3, 3, 4] @Int [1 .. 36])
           @?= mat' [1, 2, 3, 4, 17, 18, 19, 20, 33, 34, 35, 36]
     , testCase "diagonal" $
         diagonal (gen @'[4, 4] succ)
@@ -201,31 +208,31 @@ suite =
         finMatMatrix @'[2, 3, 1]
           @?= mat' (toList (N.map (fr . (nonEmptyToFinMat <=< toPositives)) ([1, 1, 1] :| [[1, 2, 1], [1, 3, 1], [2, 1, 1], [2, 2, 1], [2, 3, 1]])))
     , testCase "insert row" $
-        insertRow @2 (mat' @'[3, 4] [100 .. 111]) (mat' @'[2, 3, 4] [1 :: Int .. 24])
+        insertRow @2 (mat' @'[3, 4] [100 .. 111]) (mat' @'[2, 3, 4] @Int [1 .. 24])
           @?= mat' [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
     , testCase "insert column" $
-        insertCol @2 (mat' @'[2, 4] [100 .. 107]) (mat' @'[2, 3, 4] [1 :: Int .. 24])
+        insertCol @2 (mat' @'[2, 4] [100 .. 107]) (mat' @'[2, 3, 4] @Int [1 .. 24])
           @?= mat' [1, 2, 3, 4, 100, 101, 102, 103, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 104, 105, 106, 107, 17, 18, 19, 20, 21, 22, 23, 24]
     , testCase "delete row" $
-        deleteRow @2 (mat' @'[2, 3, 4] [1 :: Int .. 24])
+        deleteRow @2 (mat' @'[2, 3, 4] @Int [1 .. 24])
           @?= mat' [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     , testCase "insert/delete row" $
         deleteRow @2 (insertRow @2 (mat' @'[4, 5] [100 .. 119]) m345')
           @?= m345'
     , testCase "to nested lists" $
-        matToNestedListC (mat' @'[2, 3, 4] [1 :: Int .. 24])
+        matToNestedListC (mat' @'[2, 3, 4] @Int [1 .. 24])
           @?= [[[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], [[13, 14, 15, 16], [17, 18, 19, 20], [21, 22, 23, 24]]]
     , testCase "concat vertically" $
-        matToNestedListC (appendV (mat' @'[2, 3, 2] [1 .. 12]) (mat' @'[5, 3, 2] [100 :: Int .. 129]))
+        matToNestedListC (appendV (mat' @'[2, 3, 2] [1 .. 12]) (mat' @'[5, 3, 2] @Int [100 .. 129]))
           @?= [[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]], [[100, 101], [102, 103], [104, 105]], [[106, 107], [108, 109], [110, 111]], [[112, 113], [114, 115], [116, 117]], [[118, 119], [120, 121], [122, 123]], [[124, 125], [126, 127], [128, 129]]]
     , testCase "concat vertically" $
-        matToNestedListC (appendV (mat' @'[2, 3] [1 .. 6]) (mat' @'[7, 3] [100 :: Int .. 120]))
+        matToNestedListC (appendV (mat' @'[2, 3] [1 .. 6]) (mat' @'[7, 3] @Int [100 .. 120]))
           @?= [[1, 2, 3], [4, 5, 6], [100, 101, 102], [103, 104, 105], [106, 107, 108], [109, 110, 111], [112, 113, 114], [115, 116, 117], [118, 119, 120]]
     , testCase "concat horizontally" $
-        matToNestedListC (appendH (mat' @'[5, 2, 2] [1 .. 20]) (mat' @'[5, 3, 2] [100 :: Int .. 129]))
+        matToNestedListC (appendH (mat' @'[5, 2, 2] [1 .. 20]) (mat' @'[5, 3, 2] @Int [100 .. 129]))
           @?= [[[1, 2], [3, 4], [100, 101], [102, 103], [104, 105]], [[5, 6], [7, 8], [106, 107], [108, 109], [110, 111]], [[9, 10], [11, 12], [112, 113], [114, 115], [116, 117]], [[13, 14], [15, 16], [118, 119], [120, 121], [122, 123]], [[17, 18], [19, 20], [124, 125], [126, 127], [128, 129]]]
     , testCase "concat horizontally" $
-        matToNestedListC (appendH (mat' @'[3, 2] [1 .. 6]) (mat' @'[3, 7] [100 :: Int .. 120]))
+        matToNestedListC (appendH (mat' @'[3, 2] @Int [1 .. 6]) (mat' @'[3, 7] @Int [100 .. 120]))
           @?= [[1, 2, 100, 101, 102, 103, 104, 105, 106], [3, 4, 107, 108, 109, 110, 111, 112, 113], [5, 6, 114, 115, 116, 117, 118, 119, 120]]
     , testCase "consMat" $
         (gen @'[3, 4] succ ^. consMat)
@@ -282,20 +289,20 @@ suite =
         nestedVecToMatC (matToNestedVecC m345)
           @?= m345 -- works without @'[3,4,5] cos @?= tells us the type
     , testCase "delete item from 1d mat'" $
-        deleteRow @4 (mat' @'[10] [1 :: Int .. 10])
+        deleteRow @4 (mat' @'[10] @Int [1 .. 10])
           @?= mat' [1, 2, 3, 5, 6, 7, 8, 9, 10]
     , testCase "redim" $
-        redim (mat' @'[2, 3, 5] [1 :: Int .. 30])
-          @?= mat' @'[6, 5] [1 :: Int .. 30]
+        redim (mat' @'[2, 3, 5] @Int [1 .. 30])
+          @?= mat' @'[6, 5] @Int [1 .. 30]
     , testCase "redim" $
-        redim (mat' @'[5, 9, 4] [1 :: Int .. 180])
-          @?= mat' @'[3, 6, 10] [1 :: Int .. 180]
+        redim (mat' @'[5, 9, 4] @Int [1 .. 180])
+          @?= mat' @'[3, 6, 10] @Int [1 .. 180]
     , testCase "redim" $
-        redim (mat' @'[18] [1 :: Int .. 18])
-          @?= mat' @'[3, 2, 3] [1 :: Int .. 18]
+        redim (mat' @'[18] @Int [1 .. 18])
+          @?= mat' @'[3, 2, 3] @Int [1 .. 18]
     , testCase "redim" $
-        redim (mat' @'[3, 2, 3] [1 :: Int .. 18])
-          @?= mat' @'[18] [1 :: Int .. 18]
+        redim (mat' @'[3, 2, 3] @Int [1 .. 18])
+          @?= mat' @'[18] @Int [1 .. 18]
     , testCase "diagonal" $
         diagonal (gen @'[4, 4] succ)
           @?= mat' @'[4] [1, 6, 11, 16]
@@ -306,7 +313,7 @@ suite =
         diagonal (mm @(NN 99))
           @?= mat' @'[9] [1, 11, 21, 31, 41, 51, 61, 71, 81]
     , testCase "multMat" $
-        multMat (mat' @'[2, 5] [1 :: Int .. 10]) (mat' @'[5, 6] [1 :: Int .. 30])
+        multMat (mat' @'[2, 5] @Int [1 .. 10]) (mat' @'[5, 6] @Int [1 .. 30])
           @?= mat' @'[2, 6] [255, 270, 285, 300, 315, 330, 580, 620, 660, 700, 740, 780]
     , testCase "universe1 enum" $
         toNonEmpty (finMatMatrix @'[2, 3, 7])
@@ -315,16 +322,16 @@ suite =
         toList (finMatMatrix @'[2, 3, 7])
           @?= toList fmi237'
     , testCase "D3" $
-        mat' @(D3 2 3 4) [1 :: Int .. 24]
+        mat' @(D3 2 3 4) @Int [1 .. 24]
           @?= mat' @'[2, 3, 4] [1 .. 24]
     , testCase "ixMat" $
-        (mat' @'[2, 3, 4] [1 :: Int .. 24] & ixMat (finMatC @'[2, 3, 1]) +~ 100)
+        (mat' @'[2, 3, 4] @Int [1 .. 24] & ixMat (finMatC @'[2, 3, 1]) +~ 100)
           @?= mat' @'[2, 3, 4] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 121, 22, 23, 24]
     , testCase "ixMat" $
-        (mat' @'[2, 3, 4] [1 :: Int .. 24] & ixMat (finMatC @'[2, 3, 4]) +~ 100)
+        (mat' @'[2, 3, 4] @Int [1 .. 24] & ixMat (finMatC @'[2, 3, 4]) +~ 100)
           @?= mat' @'[2, 3, 4] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 124]
     , testCase "read" $
-        (read @(Mat (D1 4) Int) $ show $ mat' @'[4] [1 :: Int .. 4])
+        (read @(Mat (D1 4) Int) $ show $ mat' @'[4] @Int [1 .. 4])
           @?= (1 .: 2 .: 3 .| 4)
     , testCase "read" $
         let m = gen' @'[1] id
@@ -345,10 +352,10 @@ suite =
         let m = ('x', True, ['a' .. 'z'], gen' @'[1, 2, 3] id, False)
          in read (show m) @?= m
     , testCase "read" $
-        let m = mat' @'[4, 5] [1 :: Int .. 20]
+        let m = mat' @'[4, 5] @Int [1 .. 20]
          in read @(Mat (D2 4 5) Int) (show m) @?= m
     , testCase "read" $
-        let m = mat' @'[1, 2, 3, 4] [1 :: Int .. 24]
+        let m = mat' @'[1, 2, 3, 4] @Int [1 .. 24]
          in read (show m) @?= m
     , testCase "read" $
         let m = toND @1 (mm @(NN 2352))
@@ -361,15 +368,15 @@ suite =
          in read (show m) @?= m
     , testCase "sortByRows" $
         sortByRows (flip compare) (mat' @'[4, 2] [10, 9, 1, 2, 100, 200, 300, 400])
-          @?= mat' [10, 9, 2, 1, 200, 100, 400, 300 :: Int]
+          @?= mat' @_ @Int [10, 9, 2, 1, 200, 100, 400, 300]
     , testCase "sortByT" $
-        sortByT (flip compare) (mat' @'[4] [10 :: Int, 9, 1, 2])
+        sortByT (flip compare) (mat' @'[4] @Int [10, 9, 1, 2])
           @?= (10 .: 9 .: 2 .| 1)
     , testCase "sortByT" $
-        sortByT compare (mat' @'[4] [10 :: Int, 9, 1, 2])
+        sortByT compare (mat' @'[4] @Int [10, 9, 1, 2])
           @?= (1 .: 2 .: 9 .| 10)
     , testCase "sortByRows" $
-        sortByRows compare (mat' @'[4, 2] [10 :: Int, 9, 1, 2, 100, 200, 300, 400])
+        sortByRows compare (mat' @'[4, 2] @Int [10, 9, 1, 2, 100, 200, 300, 400])
           @?= mat' [9, 10, 1, 2, 100, 200, 300, 400]
     , testCase "totuple" $
         toTupleC (vec' "abc")
@@ -381,7 +388,7 @@ suite =
         fromTupleC (One 'a')
           @?= se1 'a'
     , testCase "fromtuple" $
-        fromTupleC (1, 2, 3 :: Int)
+        fromTupleC @_ @Int (1, 2, 3)
           @?= 1 .: 2 .| 3
     , testCase "consMat" $
         (mat' @'[1] "x" ^. consMat)
@@ -426,19 +433,19 @@ suite =
         (mat' @'[5, 3] ['A' .. 'O'] ^. snocMat)
           @?= (mat' @'[4, 3] ['A' .. 'L'], mat' @'[3] "MNO")
     , testCase "field lens" $
-        (mat' @'[3, 3, 4] [1 :: Int .. 36] ^. _r3 . _r1)
+        (mat' @'[3, 3, 4] @Int [1 .. 36] ^. _r3 . _r1)
           @?= vec' @4 [25, 26, 27, 28]
     , testCase "field lens" $
-        (mat' @'[3, 3, 4] [1 :: Int .. 36] ^. _r3 . _r1)
+        (mat' @'[3, 3, 4] @Int [1 .. 36] ^. _r3 . _r1)
           @?= vec' @4 [25, 26, 27, 28]
     , testCase "field lens update" $
         (mat' @'[2, 1, 4] ['A' .. 'H'] & _r2 . _r1 . _r3 %~ toLower)
           @?= mat' "ABCDEFgH"
     , testCase "field lens" $
-        (mat' @'[7] [1 :: Int .. 7] ^. _r3)
+        (mat' @'[7] @Int [1 .. 7] ^. _r3)
           @?= 3
     , testCase "field lens" $
-        (mat' @'[7, 4] [1 :: Int .. 28] ^. _r3 . _r2)
+        (mat' @'[7, 4] @Int [1 .. 28] ^. _r3 . _r2)
           @?= 10
     , testCase "subsetRows" $
         subsetRows @2 @2 (gen @'[2, 5] succ)
@@ -674,13 +681,13 @@ suite =
         (('x', Eof1) ^. from (consMat @'[1]))
           @?= se1 'x'
     , testCase "nestedListToMatC" $
-        nestedListToMatC @'[2, 3, 5] [[[1 :: Int, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]], [[16, 17, 18, 19, 20], [21, 22, 23, 24, 25], [26, 27, 28, 29, 30]]]
+        nestedListToMatC @'[2, 3, 5] @Int [[[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]], [[16, 17, 18, 19, 20], [21, 22, 23, 24, 25], [26, 27, 28, 29, 30]]]
           @?= Right (mat' @'[2, 3, 5] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30])
     , testCase "nestedListToMatC" $
-        nestedListToMatC @'[3, 3, 5] [[[1 :: Int, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]], [[16, 17, 18, 19, 20], [21, 22, 23, 24, 25], [26, 27, 28, 29, 30]]]
+        nestedListToMatC @'[3, 3, 5] @Int [[[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]], [[16, 17, 18, 19, 20], [21, 22, 23, 24, 25], [26, 27, 28, 29, 30]]]
           @?= Left "LT: not enough elements: expected 3 found 2"
     , testCase "nestedListToMatC" $
-        nestedListToMatC @'[2, 3, 6] [[[1 :: Int, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]], [[16, 17, 18, 19, 20], [21, 22, 23, 24, 25], [26, 27, 28, 29, 30]]]
+        nestedListToMatC @'[2, 3, 6] @Int [[[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]], [[16, 17, 18, 19, 20], [21, 22, 23, 24, 25], [26, 27, 28, 29, 30]]]
           @?= Left "not enough elements: expected 6 found 5"
     , testCase "indexRow" $
         indexRow (fr $ fin @7 1) (gen' @(NN 73) id)
@@ -692,19 +699,19 @@ suite =
         indexRow (fr $ fin @7 7) (gen' @(NN 73) id)
           @?= vec' [[7, 1], [7, 2], [7, 3]]
     , testCase "readVec" $
-        readVec @5 @Int (show (mm @(NN 5))) @?= [(vec' [1 .. 5], "")]
+        readVec @5 @Int (show (vec' @5 [1::Int ..5])) @?= [(vec' [1 .. 5], "")]
     , testCase "readMat2" $
         let m = mat' @'[3, 7] ['a' .. 'u']
          in readMat2 @3 @7 @Char (show m ++ "xyz") @?= [(m, "xyz")]
     , testCase "readVec" $
         let m = mat' @'[7] ['a' .. 'g']
          in readVec @7 @Char (show m ++ " xyz") @?= [(m, " xyz")]
-    , testCase "readMat2" $
-        let m = mm @(NN 372)
-         in readMat @(NN 372) @Int (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
+    , testCase "readMat" $
+        let m = mat' @'[3,7,2] [1::Int .. 42]
+         in readMat @'[3,7,2] @Int (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
     , testCase "readMat12" $
-        let m = toVec (mm @(NN 372))
-         in readVec @3 @(Mat2 7 2 Int) (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
+        let m = mat' @'[3,7,2] [1::Int .. 42]
+         in readMat @'[3,7,2] @Int (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
     , testCase "readMat3456" $
         let m = toMat2 (mm @(NN 3456))
          in readMat2 @3 @4 @(Mat2 5 6 Int) (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
@@ -722,19 +729,19 @@ suite =
           @?= vec' @1 [99]
     , testCase "(.:)" $
         (12 .: 44 .| 99)
-          @?= vec' @3 [12 :: Int, 44, 99]
+          @?= vec' @3 @Int [12, 44, 99]
     , testCase "(.:)" $
         (5 .| 10 .:: 15 .| 20 .|| (25 .| 30))
-          @?= mat2' @3 @2 [5 :: Int, 10, 15, 20, 25, 30]
+          @?= mat2' @3 @2 @Int [5, 10, 15, 20, 25, 30]
     , testCase "(.:)" $
         se2 (5 .| 10 .:: 15 .| 20 .|| (25 .| 30))
-          @?= mat' @'[1, 3, 2] [5 :: Int, 10, 15, 20, 25, 30]
+          @?= mat' @'[1, 3, 2] @Int [5, 10, 15, 20, 25, 30]
     , testCase "nestedListToMatValidated" $
         let x = [[[[1 :: Int, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], [[13, 14, 15, 16], [17, 18, 19, 20], [21, 22, 23, 24, 25, 26, 27]]]]
-         in nestedListToMatValidated @(NN 1234) x @?= Left "validateNestedListC: lengths=[4,4,4,4,4,7] ixes=[1P,2P,3P]"
+         in nestedListToMatValidated @(NN 1234) x @?= Left "validateNestedListC: lengths=[4,4,4,4,4,7] ixes=[_1P,_2P,_3P]"
     , testCase "nestedListToMatValidated" $
         let x = [[[[1 :: Int, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], [[13, 14, 15, 16], [17, 18, 19, 20], []]]]
-         in nestedListToMatValidated @(NN 1234) x @?= Left "validateNestedListC: lengths=[4,4,4,4,4,0] ixes=[1P,2P,3P]"
+         in nestedListToMatValidated @(NN 1234) x @?= Left "validateNestedListC: lengths=[4,4,4,4,4,0] ixes=[_1P,_2P,_3P]"
     , testCase "nestedListToMatValidated" $
         let x = [[[[1 :: Int, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], [[13, 14, 15, 16], [17, 18, 19, 20], [21, 22, 23, 24]]]]
          in nestedListToMatValidated @(NN 1234) x @?= Right (mat' @'[1, 2, 3, 4] [1 .. 24])
@@ -812,7 +819,7 @@ suite =
         unfoldrRep @(Vec 5) (\i s -> (drop 1 s, (fmPos i, head s))) ['a' .. 'h']
           @?= ("fgh", vec' @5 [(0, 'e'), (1, 'd'), (2, 'c'), (3, 'b'), (4, 'a')])
     , testCase "fillTraversable" $
-        fillTraversable @(MatN 234) (pure ()) [1 :: Int .. 40]
+        fillTraversable @(MatN 234) @Int (pure ()) [1.. 40]
           @?= Right ([25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40], mat' @'[2, 3, 4] [1 .. 24])
     , testCase "toInteger1" $
         toInteger1 (pure @(Mat2 4 2) EQ)
@@ -895,14 +902,98 @@ suite =
     , testCase "fromInteger1" $
         fromInteger1 (minBound @(Mat '[2, 5] Int8)) (-1276136419117121619201)
           @?= Left "cap=(-1276136419117121619200,1180591620717411303423):padL: negative fill: would need to truncate the data"
-
     , testCase "lenses mixed" $
-       mm @(NN 1234) ^. _r1 . _r1 . _c2 . snocMat . _1 . consMat
-        @?= (2,vec @1 [6])
-
+        mm @(NN 1234) ^. _r1 . _r1 . _c2 . snocMat . _1 . consMat
+          @?= (2, vec @1 [6])
     , testCase "lenses mixed" $
         mm @(NN 734) ^. _c3 . snocMat . _1 . _c4 . _r5
-        @?= 60
+          @?= 60
+    , testCase "withN" $
+        let s = withN 5 $ \(_ :: x n) ->
+              withN 3 $ \(_ :: x m) ->
+                withN 2 $ \(_ :: x p) ->
+                  let w1 :: Mat2 n m Int -- if you use let statements then must have signatures else fails with constraints not satisfied
+                      w1 = mat2 @n @m [1 ..]
+                      w2 :: Mat2 m p Int
+                      w2 = mat2 @m @p [10 ..]
+                      z = multMat w1 w2
+                   in show (fromNSP @'[n, m, p], z)
+         in read @(NonEmpty Pos, Mat2 5 2 Int) s
+              @?= (_5P :| [_3P, _2P], mat2 @5 @2 [76, 82, 184, 199, 292, 316, 400, 433, 508, 550])
+    , testCase "withN" $
+        let s = withN 5 $ \(_ :: x n) ->
+              withN 3 $ \(_ :: x m) ->
+                show (mat2 @n @m @Int [1 ..] `multMat` mat2 @m @n @Int [10 ..])
+         in read @(Mat2 5 5 Int) s @?= mat2' @5 @5 [100, 106, 112, 118, 124, 235, 250, 265, 280, 295, 370, 394, 418, 442, 466, 505, 538, 571, 604, 637, 640, 682, 724, 766, 808]
+    , testCase "withN" $
+        let s = withN 5 $ \(_ :: x n) -> show (vec @n @Int [1 ..])
+         in read @(Vec 5 Int) s @?= vec' @5 [1 .. 5]
+    , testCase "withN" $
+        let s = withN 5 $ \(_ :: x n) ->
+              withN 7 $ \(_ :: x m) -> show (mat2 @n @m @Int [1 ..], mat2 @m @n ['a' ..])
+         in read @(Mat2 5 7 Int, Mat2 7 5 Char) s @?= (mat2' @5 @7 [1 .. 35], mat2 @7 @5 ['a' ..])
+    , testCase "withN2" $
+        let z = withN2 4 5 $ \(_ :: p n) (_ :: p m) -> show (mat2 @n @m ['a' ..])
+         in read @(Mat2 4 5 Char) z @?= mat2' @4 @5 ['a' .. 't']
+    , testCase "withN3" $
+        withN3 2 3 4 (\(_ :: z n) (_ :: z m) (_ :: z q) -> fromNSP @'[n, m, q])
+          @?= _2P :| [_3P, _4P]
+    , testCase "withN3" $
+        let z = withN 4 $ \(_ :: p n) -> show (mat2 @2 @n @Int [1..] ^. _row @1)
+         in read @(Vec 4 Int) z @?= vec' @4 [1 .. 4]
+    , testCase "withN3" $
+        let z = withN 4 $ \(_ :: p n) -> show (mat2 @2 @n @Int [1 ..] ^. _row @2)
+         in read @(Vec 4 Int) z @?= vec' @4 [5 .. 8]
+
+    , testCase "withNMin3" $
+         let z = withNMin3 5 (\(_ :: p n) -> withNMin3 4 (\(_ :: p m) -> show (mat2 @n @m [1::Int ..] ^. _c2)))
+         in read @(Vec 5 Int) z @?= vec' @5 [2,6,10,14,18]
+
+    , testCase "rotateLeft rotateRight" $
+        let z = mm @(NN 57)
+        in rotateLeft (rotateRight z) @?= z
+    , testCase "rotateLeft" $
+        rotateLeft (mm @(NN 35))
+          @?= mat2' @5 @3 [5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
+      ,testCase "rotateRight" $
+        rotateRight (mm @(NN 35))
+          @?= mat2' @5 @3 [11,6,1,12,7,2,13,8,3,14,9,4,15,10,5]
+    , testCase "rotateRight transpose rotateRight" $
+        let z = mm @(NN 57)
+        in (transposeMat . rotateLeft . transposeMat) z  @?= rotateRight z
+
+    , testCase "determinant" $
+        determinant (mat2' @3 @3 @Int [2, -3, 1, 2, 0, -1, 1, 4, 5])
+          @?= 49
+    , testCase "determinant" $
+        determinant (mat2' @3 @3 @Int [1, 3, 2, -3, -1, -3, 2, 3, 1])
+          @?= (-15)
+    , testCase "determinant" $
+        determinant (mat2' @4 @4 @Int [3, 2, 0, 1, 4, 0, 1, 2, 3, 0, 2, 1, 9, 2, 3, 1])
+          @?= 24
+    , testCase "determinant" $
+        determinant (mat2' @4 @4 @Int [1, 0, 2, -1, 3, 0, 0, 5, 2, 1, 4, -3, 1, 0, 5, 0])
+          @?= 30
+    , testCase "determinant" $
+        determinant (mat2' @4 @4 @Int [1, 0, 4, -6, 2, 5, 0, 3, -1, 2, 3, 5, 2, 1, -2, 3])
+          @?= 318
+    , testCase "determinant" $
+        determinant (mat2' @2 @2 @Int [1, 2, 3, 4])
+          @?= (-2)
+
+    , testCase "determinant" $
+        determinant (mat2' @1 @1 @Int [-5])
+          @?= (-5)
+    , testCase "deleteColumnL" $
+        deleteColumnL _2P 1 [1,2::Int] @?= [1]
+    , testCase "deleteColumnL" $
+        deleteColumnL _2P 0 [1,2::Int] @?= [2]
+    , testCase "deleteColumnL" $
+        deleteColumnL _3P 1 [1::Int .. 12] @?= [1,3,4,6,7,9,10,12]
+    , testCase "deleteColumnL" $
+        deleteColumnL _2P 1 [1..10::Int] @?=  [1,3,5,7,9]
+    , testCase "deleteColumnL" $
+        deleteColumnL _1P 0 [1::Int] @?= []
     ]
 
 suiteCheckers :: TestTree
@@ -920,3 +1011,55 @@ fmi237' = frp $ traverse (nonEmptyToFinMat <=< toPositives) fmi237
 
 fmi237 :: NonEmpty (NonEmpty Int)
 fmi237 = fmap N.fromList ([1, 1, 1] :| [[1, 1, 2], [1, 1, 3], [1, 1, 4], [1, 1, 5], [1, 1, 6], [1, 1, 7], [1, 2, 1], [1, 2, 2], [1, 2, 3], [1, 2, 4], [1, 2, 5], [1, 2, 6], [1, 2, 7], [1, 3, 1], [1, 3, 2], [1, 3, 3], [1, 3, 4], [1, 3, 5], [1, 3, 6], [1, 3, 7], [2, 1, 1], [2, 1, 2], [2, 1, 3], [2, 1, 4], [2, 1, 5], [2, 1, 6], [2, 1, 7], [2, 2, 1], [2, 2, 2], [2, 2, 3], [2, 2, 4], [2, 2, 5], [2, 2, 6], [2, 2, 7], [2, 3, 1], [2, 3, 2], [2, 3, 3], [2, 3, 4], [2, 3, 5], [2, 3, 6], [2, 3, 7]])
+
+-- ghc 9.2 needs explicit kinds for "i" and "n"
+overrideDictPositive :: forall (i :: Nat) (n :: Nat) p . p n -> (i GN.<=? n) :~: 'True
+overrideDictPositive _ = unsafeCoerce Refl
+
+-- | lift a positive number to the typelevel
+withN :: Int -> (forall n. FinC 1 n => Proxy n -> x) -> x
+withN i f
+  | i <= 1 = normalError $ "withN: index must be at least 1:found " ++ show i
+  | otherwise =
+      case GN.someNatVal (toEnum i) of
+        GN.SomeNat (pn :: Proxy n) ->
+          case overrideDictPositive @1 pn of
+            Refl -> f (Proxy @n)
+
+-- | lift a positive number to the typelevel
+withNMin2 :: Int -> (forall n . (FinC 2 n, FinC 1 n) => Proxy n -> x) -> x
+withNMin2 i f
+  | i < 2 = normalError $ "withNMin2: index must be at least 2:found " ++ show i
+  | otherwise =
+      case GN.someNatVal (toEnum i) of
+        GN.SomeNat (pn :: Proxy n) ->
+          case overrideDictPositive @1 pn of
+            Refl ->
+              case overrideDictPositive @2 pn of
+                 Refl -> f (Proxy @n)
+
+withNMin3 :: Int -> (forall n . (FinC 3 n, FinC 2 n, FinC 1 n) => Proxy n -> x) -> x
+withNMin3 i f
+  | i < 3 = normalError $ "withNMin3: index must be at least 3:found " ++ show i
+  | otherwise =
+      case GN.someNatVal (toEnum i) of
+        GN.SomeNat (pn :: Proxy n) ->
+          case overrideDictPositive @1 pn of
+            Refl ->
+              case overrideDictPositive @2 pn of
+                Refl ->
+                  case overrideDictPositive @3 pn of
+                    Refl -> f (Proxy @n)
+
+-- | lift two positive numbers to the typelevel
+withN2 :: Int -> Int -> (forall n m. (FinC 1 n, FinC 1 m) => Proxy n -> Proxy m -> x) -> x
+withN2 i j f = withN i $ \p1 -> withN j $ \p2 -> f p1 p2
+
+-- | lift three positive numbers to the typelevel
+withN3 :: Int -> Int -> Int -> (forall n m p. (FinC 1 n, FinC 1 m, FinC 1 p) => Proxy n -> Proxy m -> Proxy p -> x) -> x
+withN3 i j k f = withN i $ \p1 -> withN j $ \p2 -> withN k $ \p3 -> f p1 p2 p3
+
+-- | lift four positive numbers to the typelevel
+withN4 :: Int -> Int -> Int -> Int -> (forall n m p q. (FinC 1 n, FinC 1 m, FinC 1 p, FinC 1 q) => Proxy n -> Proxy m -> Proxy p -> Proxy q -> x) -> x
+withN4 i j k l f = withN i $ \p1 -> withN j $ \p2 -> withN k $ \p3 -> withN l $ \p4 -> f p1 p2 p3 p4
+

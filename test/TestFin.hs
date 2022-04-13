@@ -164,13 +164,13 @@ suite =
           @?= Right (FinU @5 _4P _5P)
     , testCase "_Fin" $
         mkFinC @5 _10P _5P
-          @?= Left "mkFin:10P is too large: maximum is 5P"
+          @?= Left "mkFin:_10P is too large: maximum is _5P"
     , testCase "mkFinC" $
         mkFinC @9 _4P _10P
-          @?= Left "mkFinC: 10P /= 9P at typelevel"
+          @?= Left "mkFinC: _10P /= _9P at typelevel"
     , testCase "mkFinC" $
         mkFinC @9 _12P _10P
-          @?= Left "mkFinC: 10P /= 9P at typelevel"
+          @?= Left "mkFinC: _10P /= _9P at typelevel"
     , testCase "signum1" $
         signum1 (Right (FinU @5 _4P _5P))
           @?= Right (FinU @5 _1P _5P)
@@ -229,7 +229,7 @@ suite =
     , testCase "fin" $
         fin @10 (-5) @?= Left "eitherPos: i<=0: found -5"
     , testCase "fin" $
-        fin @10 11 @?= Left "mkFin:11P is too large: maximum is 10P"
+        fin @10 11 @?= Left "mkFin:_11P is too large: maximum is _10P"
     , testCase "fin" $
         fin @10 10 @?= Right (FinU _10P _10P)
     , testCase "fin" $

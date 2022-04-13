@@ -74,14 +74,14 @@ import qualified Data.List.NonEmpty as N
 import Data.Pos
 import Data.Proxy
 import qualified GHC.TypeLits as GL
-import GHC.TypeNats (Nat)
+import GHC.TypeNats (Nat,KnownNat)
 import qualified GHC.TypeNats as GN
 import Primus.Error
 import Primus.Fold
 import Primus.List
 import Primus.NonEmpty
 import Primus.One
-import qualified Primus.TypeLevel as TP (FailUnless)
+import Primus.TypeLevel (FailUnless)
 
 -- | get the factorial of a 'Nat'
 type FacT :: Nat -> Nat
@@ -93,7 +93,7 @@ type family FacT x where
 -- | constraint for ensuring that "i" <= "n"
 type (<=!) :: Nat -> Nat -> Constraint
 type i <=! n =
-  ( TP.FailUnless
+  ( FailUnless
       (i GN.<=? n)
       ( 'GL.Text "i>n"
           'GL.:<>: 'GL.Text ": i="
@@ -101,13 +101,13 @@ type i <=! n =
           'GL.:<>: 'GL.Text " n="
           'GL.:<>: 'GL.ShowType n
       )
-  , PosT i
+  , PosC i
   )
 
 -- | constraint for ensuring that "i" <= "n" with a custom error message
 type LTEQT :: GL.ErrorMessage -> Nat -> Nat -> Constraint
 type LTEQT msg i n =
-  ( TP.FailUnless
+  ( FailUnless
       (i GN.<=? n)
       ( 'GL.Text "i>n"
           'GL.:<>: 'GL.Text ": i="
@@ -116,13 +116,13 @@ type LTEQT msg i n =
           'GL.:<>: 'GL.ShowType n
           'GL.:<>: msg
       )
-  , PosT i
+  , PosC i
   )
 
 -- | constraint for ensuring that "i" <= "n"
 type (<!) :: Nat -> Nat -> Constraint
 type i <! n =
-  ( TP.FailUnless
+  ( FailUnless
       (i GN.+ 1 GN.<=? n)
       ( 'GL.Text "i>=n"
           'GL.:<>: 'GL.Text ": i="
@@ -130,8 +130,24 @@ type i <! n =
           'GL.:<>: 'GL.Text " n="
           'GL.:<>: 'GL.ShowType n
       )
-  , GN.KnownNat i
+  , KnownNat i
   )
+
+-- | constraint for positive numbers
+type LTEQC :: Nat -> Nat -> Constraint
+class (KnownNat i, KnownNat n) => LTEQC i n where
+instance
+  ( KnownNat i
+  , KnownNat n
+  , FailUnless
+      (i GL.<=? n)
+      ( 'GL.Text "LTEQC n: requires n >= i but found i="
+          'GL.:<>: 'GL.ShowType i
+          'GL.:<>: 'GL.Text " n="
+          'GL.:<>: 'GL.ShowType n
+      )
+  ) =>
+  LTEQC i n
 
 -- | constraint for DiffC with better error messages
 type DiffTC :: Nat -> Nat -> Nat -> Constraint
@@ -155,7 +171,7 @@ type family ReverseT' ns ret where
 -- | product of a type level list as a 'Nat'
 type ProductT :: [Nat] -> Nat
 type family ProductT ns where
-  ProductT '[] = GL.TypeError ('GL.Text "ProductT: empty indices")
+  ProductT '[] = GL.TypeError ( 'GL.Text "ProductT: empty indices")
   ProductT '[n] = n
   ProductT (n ': n1 ': ns) = n GN.* ProductT (n1 ': ns)
 
@@ -193,7 +209,7 @@ instance ValidateNestedNonEmptyC x ( 'S 'Z) where
       [] -> programmError "ValidateNestedNonEmptyC: ('S 'Z): empty list of indices"
 instance ValidateNestedNonEmptyC x ( 'S zs) => ValidateNestedNonEmptyC (NonEmpty x) ( 'S ( 'S zs)) where
   validateNestedNonEmptyC ixes x@(n :| ns) xs =
-    let cs = map clOrdering $ compareLengths (x :| xs)
+    let cs = map clOrdering $ compareLengths x xs
      in if all (Just EQ ==) cs
           then
             let zs = ns <> concatMap N.toList xs
@@ -215,7 +231,7 @@ instance ValidateNestedListC x ( 'S 'Z) where
 instance ValidateNestedListC x ( 'S n) => ValidateNestedListC [x] ( 'S ( 'S n)) where
   validateNestedListC ixes [] _ = Left $ "validateNestedListC: ixes=" ++ show ixes ++ ":no data!"
   validateNestedListC ixes x@(n : ns) xs =
-    let cs = map clOrdering $ compareLengths (x :| xs)
+    let cs = map clOrdering $ compareLengths x xs
      in if all (Just EQ ==) cs
           then
             let zs = ns <> concat xs
@@ -240,14 +256,14 @@ type family PeanoToNatT n where
 -- | convert a matrix index into nested lists
 type ListNST :: [Nat] -> Type -> Type
 type family ListNST ns a where
-  ListNST '[] _ = GL.TypeError ('GL.Text "ListNST: empty indices")
+  ListNST '[] _ = GL.TypeError ( 'GL.Text "ListNST: empty indices")
   ListNST '[_] a = [a]
   ListNST (_ ': n1 ': ns) a = [ListNST (n1 ': ns) a]
 
 -- | convert a matrix index into nested lists
 type NonEmptyNST :: [Nat] -> Type -> Type
 type family NonEmptyNST ns a where
-  NonEmptyNST '[] _ = GL.TypeError ('GL.Text "NonEmptyNST: empty indices")
+  NonEmptyNST '[] _ = GL.TypeError ( 'GL.Text "NonEmptyNST: empty indices")
   NonEmptyNST '[_] a = NonEmpty a
   NonEmptyNST (_ ': n1 ': ns) a = NonEmpty (NonEmptyNST (n1 ': ns) a)
 
@@ -270,12 +286,12 @@ class NestedListC ns where
 
   flattenNestedListC :: proxy a -> ListNST ns a -> Either String [a]
 
-instance GL.TypeError ('GL.Text "NestedListC '[]: empty indices") => NestedListC '[] where
+instance GL.TypeError ( 'GL.Text "NestedListC '[]: empty indices") => NestedListC '[] where
   nestedListToNonEmptyC = compileError "NestedListC '[]:nestedListToNonEmptyC"
   nestedNonEmptyToListC = compileError "NestedListC '[]:nestedNonEmptyToListC"
   flattenNestedListC = compileError "NestedListC '[]:flattenNestedListC"
 
-instance PosT n => NestedListC '[n] where
+instance PosC n => NestedListC '[n] where
   nestedListToNonEmptyC _ = \case
     [] -> Left "nestedListToNonEmptyC 'SZ no data"
     x : xs -> lmsg "nestedListToNonEmptyC 'SZ" $ lengthExact1 (fromNP @n) (x :| xs)
@@ -284,7 +300,7 @@ instance PosT n => NestedListC '[n] where
     [] -> Left "flattenNestedListC 'SZ no data"
     x : xs -> lmsg "flattenNestedListC 'SZ" $ lengthExact (fromN @n) (x : xs)
 
-instance (PosT n, NestedListC (n1 ': ns)) => NestedListC (n ': n1 ': ns) where
+instance (PosC n, NestedListC (n1 ': ns)) => NestedListC (n ': n1 ': ns) where
   nestedListToNonEmptyC p = \case
     [] -> Left "nestedListToNonEmptyC 'SS no data"
     x : xs -> do

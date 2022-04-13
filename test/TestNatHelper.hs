@@ -43,5 +43,5 @@ suite =
         validateNestedList ([] :: [()])
           @?= Left "validateNestedListC: ixes=[]:no data!"
     , testCase "validateNestedList" $
-        validateNestedList [[1 :: Int, 2], [1, 2], [1, 2, 3]] @?= Left "validateNestedListC: lengths=[2,2,3] ixes=[3P]"
+        validateNestedList [[1 :: Int, 2], [1, 2], [1, 2, 3]] @?= Left "validateNestedListC: lengths=[2,2,3] ixes=[_3P]"
     ]

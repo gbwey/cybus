@@ -3,5 +3,11 @@ cradle:
     - path: "./src"
       component: "cybus:lib"
 
+    - path: "./app/Main.hs"
+      component: "cybus:exe:cybus-exe"
+
+    - path: "./app/Paths_cybus.hs"
+      component: "cybus:exe:cybus-exe"
+
     - path: "./test"
       component: "cybus:test:cybus-test"

@@ -14,7 +14,6 @@ module Cybus (
   module Primus.Bool,
   module Primus.Enum,
   module Primus.Error,
-  module Primus.Extra,
   module Primus.Fold,
   module Primus.List,
   module Primus.NonEmpty,
@@ -31,7 +30,6 @@ import Primus.AsMaybe
 import Primus.Bool
 import Primus.Enum
 import Primus.Error
-import Primus.Extra
 import Primus.Fold
 import Primus.List
 import Primus.NonEmpty

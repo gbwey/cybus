@@ -20,6 +20,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE TupleSections #-}
 
 {- |
 Module      : Cybus.Mat
@@ -109,6 +110,10 @@ module Cybus.Mat (
   cartesian,
   pureMat,
   replicateMat,
+  determinant,
+--  determinantL,
+--  cofactorsL,
+deleteColumnL,
 
   -- * row operations
   deleteRow,
@@ -159,6 +164,8 @@ module Cybus.Mat (
   concatMat,
   redim,
   reverseDim,
+  rotateLeft,
+  rotateRight,
 
   -- * subset and slicing
   SliceC (..),
@@ -295,9 +302,9 @@ import GHC.TypeNats (Nat)
 import qualified GHC.TypeNats as GN
 import Primus.Enum
 import Primus.Error
-import Primus.Extra
 import Primus.Fold
 import Primus.Lens
+import Primus.List
 import Primus.NonEmpty
 import Primus.Num1
 import Primus.One
@@ -344,7 +351,7 @@ type Mat5 n m p q r = Mat '[n, m, p, q, r]
 type Mat6 :: Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Type -> Type
 type Mat6 n m p q r s = Mat '[n, m, p, q, r, s]
 
--- | convenient type synonym for specifying the dimensions of a matrix using the 'NN' type family
+-- | convenient type synonym for specifying the dimensions of a matrix using each digit as a dimension
 type MatN :: Nat -> Type -> Type
 type MatN n = Mat (NN n)
 
@@ -370,7 +377,7 @@ pattern MatIU ::
 pattern MatIU v ps <-
   MatUnsafe v ps
   where
-    MatIU = frp .@ mkMat -- dont change this: frp is needed
+    MatIU = frp .@ mkMat
 
 {-# COMPLETE MatU #-}
 
@@ -384,7 +391,7 @@ pattern MatU ::
 pattern MatU v ps <-
   MatUnsafe v ps
   where
-    MatU = frp .@ mkMatC -- dont change this: frp is needed
+    MatU = frp .@ mkMatC
 
 instance (Bounded a, Enum a) => Num1 (Mat ns a) where
   fromInteger1 = toEnumTraversable
@@ -426,7 +433,7 @@ pureMat a =
    in MatU (V.replicate (productPInt ns) a) ns
 
 -- | creates a matrix of first dimension "n" by replicating the input matrix "n" times
-replicateMat :: forall n n1 ns a. PosT n => Mat (n1 ': ns) a -> Mat (n ': n1 ': ns) a
+replicateMat :: forall n n1 ns a. PosC n => Mat (n1 ': ns) a -> Mat (n ': n1 ': ns) a
 replicateMat (Mat v ns) =
   let n = fromNP @n
    in MatIU (V.concat (replicate (unP n) v)) (n N.<| ns)
@@ -604,11 +611,11 @@ setMat a fm (Mat v ps) = MatIU (V.update v (V.singleton (fmPos fm, a))) ps
 
 -- | updates a value in a matrix
 updateMat :: (a -> a) -> FinMat ns -> Mat ns a -> Mat ns a
-updateMat f (FinMat i _) (Mat v ps) =
+updateMat f (FinMat i _) (Mat v ps) = forceRightP "updateMat" $ do
   let (v1, v2) = V.splitAt i v
-   in case V.uncons v2 of
-        Just (a, v2') -> MatIU (v1 <> V.cons (f a) v2') ps
-        Nothing -> programmError $ "updateMat: i=" ++ show i
+  case V.uncons v2 of
+        Just (a, v2') -> mkMat (v1 <> V.cons (f a) v2') ps
+        Nothing -> Left $ "i=" ++ show i
 
 -- | cons a value with a 1d matrix
 (.:) :: forall n a a'. a ~ a' => a -> Vec n a' -> Vec (1 GN.+ n) a'
@@ -643,19 +650,19 @@ se2 :: forall n ns a. Mat (n ': ns) a -> Mat (1 ': n ': ns) a
 se2 (Mat v ps) = MatIU v (_1P N.<| ps)
 
 -- | create a 1d matrix from a list of values
-vec :: forall n a. (HasCallStack, PosT n) => [a] -> Vec n a
+vec :: forall n a. (HasCallStack, PosC n) => [a] -> Vec n a
 vec = mat @'[n]
 
 -- | create a 1d matrix from a list of values with the exact number of elements
-vec' :: forall n a. (HasCallStack, PosT n) => [a] -> Vec n a
+vec' :: forall n a. (HasCallStack, PosC n) => [a] -> Vec n a
 vec' = mat' @'[n]
 
 -- | create a 2d matrix from a list of values
-mat2 :: forall n m a. (HasCallStack, PosT n, PosT m) => [a] -> Mat2 n m a
+mat2 :: forall n m a. (HasCallStack, PosC n, PosC m) => [a] -> Mat2 n m a
 mat2 = mat @'[n, m]
 
 -- | create a 2d matrix from a list of values with the exact number of elements
-mat2' :: forall n m a. (HasCallStack, PosT n, PosT m) => [a] -> Mat2 n m a
+mat2' :: forall n m a. (HasCallStack, PosC n, PosC m) => [a] -> Mat2 n m a
 mat2' = mat' @'[n, m]
 
 -- | map each column
@@ -864,61 +871,65 @@ instance GL.TypeError ( 'GL.Text "SliceC' '[] '[]: empty indices ns and ns'") =>
 instance n ~ n' => SliceC' '[n'] '[n] where
   sliceC' (FinMat i _) (Mat v _) =
     case v V.!? i of
-      Nothing -> programmError $ "sliceC': index " ++ show i ++ " out of bounds"
+      Nothing -> programmError $ "sliceC' '[n] '[n]: index " ++ show i ++ " out of bounds"
       Just a -> a
-  sliceUpdateC' (FinMat i _) (Mat v ps) b =
+  sliceUpdateC' (FinMat i _) (Mat v ps) b = forceRightP "sliceUpdateC' '[n] '[n]" $ do
     let (v1, v2) = V.splitAt i v
-     in case V.uncons v2 of
-          Just (_, v3) -> MatIU (v1 <> V.cons b v3) ps
-          Nothing -> programmError $ "sliceUpdateC': index " ++ show i ++ " out of bounds"
+    case V.uncons v2 of
+          Just (_, v3) -> mkMat (v1 <> V.cons b v3) ps
+          Nothing -> Left $ "index " ++ show i ++ " out of bounds"
 instance n ~ n' => SliceC' '[n'] (n ': m ': ns) where
-  sliceC' (FinMat i _) (Mat v (_ :| ps)) =
+  sliceC' (FinMat i _) (Mat v (_ :| ps)) = forceRightP "sliceC' '[n] (n ': m ': ns)" $ do
     case ps of
-      m : ns ->
+      m : ns -> do
         let ps1 = m :| ns
             len1 = productPInt ps1
-         in MatIU (V.slice (i * len1) len1 v) ps1
-      [] -> programmError $ "sliceC': index " ++ show i ++ ": missing indices"
+        mkMat (V.slice (i * len1) len1 v) ps1
+      [] -> Left $ "index " ++ show i ++ ": missing indices"
 
-  sliceUpdateC' (FinMat i0 _) (Mat v w@(_ :| ps)) b =
+  sliceUpdateC' (FinMat i0 _) (Mat v w@(_ :| ps)) b = forceRightP "sliceUpdateC' '[n] (n ': m ': ns)" $ do
     let len = productPInt ps
         i = i0 + 1
         v1 = V.slice 0 ((i - 1) * len) v
         v2 = V.slice (i * len) (productPInt w - i * len) v
-     in MatIU (v1 <> mVec b <> v2) w
+    mkMat (v1 <> mVec b <> v2) w
 
 instance
   (n ~ n', SliceC' (n1' ': ns') (n1 ': ns)) =>
   SliceC' (n ': n1' ': ns') (n' ': n1 ': ns)
   where
-  sliceC' fm@(FinMat _ (_ :| n1ns')) w@(Mat _ (n :| _)) =
+  sliceC' fm@(FinMat _ (_ :| n1ns')) w@(Mat _ (n :| _)) = forceRightP "sliceC' (n ': n1' ': ns')" $ do
     let x :| xs = finMatToNonEmpty fm
         i = unP x - 1
-     in case (xs, n1ns') of
-          (x1 : x1s, n1 : ns') ->
-            let fn1 = frp $ nonEmptyToFinMat' (x1 :| x1s) (n1 :| ns')
-             in sliceC' @(n1' ': ns') @(n1 ': ns) fn1 (sliceC' @'[n'] @(n ': n1 ': ns) (frp $ mkFinMat i (n :| [])) w)
-          ([], _) -> programmError "sliceC': missing ns' indices"
-          (_, []) -> programmError "sliceC': missing ns indices"
-  sliceUpdateC' fm@(FinMat _ (_ :| n1ns')) (Mat v w@(_ :| ps0)) b =
+    case (xs, n1ns') of
+          (x1 : x1s, n1 : ns') -> do
+            fn1 <- nonEmptyToFinMat' (x1 :| x1s) (n1 :| ns')
+            w1 <- mkFinMat i (n :| [])
+            pure $ sliceC' @(n1' ': ns') @(n1 ': ns) fn1 (sliceC' @'[n'] @(n ': n1 ': ns) w1 w)
+          ([], _) -> Left "missing ns' indices"
+          (_, []) -> Left "missing ns indices"
+  sliceUpdateC' fm@(FinMat _ (_ :| n1ns')) (Mat v w@(_ :| ps0)) b = forceRightP "sliceUpdateC' (n ': n1' ': ns')" $ do
     -- carve out the piece that is to be updated and pass that down then patch it all back together
     let x :| xs = finMatToNonEmpty fm
         i = unP x
-     in case (ps0, xs, n1ns') of
-          (_ : ns, x1 : x1s, n1 : ns') ->
-            let fn1 = frp $ nonEmptyToFinMat' (x1 :| x1s) (n1 :| ns')
-                ps1 = n1 :| ns
+    case (ps0, xs, n1ns') of
+          (_ : ns, x1 : x1s, n1 : ns') -> do
+            fn1 <- nonEmptyToFinMat' (x1 :| x1s) (n1 :| ns')
+            let ps1 = n1 :| ns
                 len = productPInt ps1
                 v1 = V.slice 0 ((i - 1) * len) v
                 v2 = V.slice (i * len) (productPInt w - i * len) v
-                m1 = MatIU (V.slice ((i - 1) * len) len v) ps1
-                mx = sliceUpdateC' @(n1' ': ns') @(n1 ': ns) fn1 m1 b
-             in MatIU (v1 <> mVec mx <> v2) w
-          ([], _, _) -> programmError "sliceUpdateC': missing matrix indices"
-          (_, [], _) -> programmError "sliceUpdateC': missing ns' indices"
-          (_, _, []) -> programmError "sliceUpdateC': missing finmat indices"
+            m1 <- mkMat (V.slice ((i - 1) * len) len v) ps1
+            let mx = sliceUpdateC' @(n1' ': ns') @(n1 ': ns) fn1 m1 b
+            mkMat (v1 <> mVec mx <> v2) w
+          ([], _, _) -> Left "missing matrix indices"
+          (_, [], _) -> Left "missing ns' indices"
+          (_, _, []) -> Left "missing finmat indices"
 
-instance (GL.TypeError ( 'GL.Text "SliceC': too many indices ns': length ns' > length ns")) => SliceC' (n' ': n1' ': ns') '[n] where
+instance
+  GL.TypeError ( 'GL.Text "SliceC': too many indices ns': length ns' > length ns") =>
+  SliceC' (n' ': n1' ': ns') '[n]
+  where
   sliceC' = compileError "sliceC'"
   sliceUpdateC' = compileError "sliceUpdateC'"
 
@@ -1000,27 +1011,27 @@ instance GL.TypeError ( 'GL.Text "SliceC '[] '[]: empty indices ns and ns'") => 
   sliceC = compileError "SliceC:sliceC"
   sliceUpdateC = compileError "SliceC:sliceUpdateC"
 
-instance FinT i n => SliceC '[i] '[n] where
+instance FinC i n => SliceC '[i] '[n] where
   sliceC (Mat v _) =
     let i = fromN @i - 1
      in case v V.!? i of
           Nothing -> programmError $ "sliceC: index " ++ show i ++ " out of bounds"
           Just a -> a
-  sliceUpdateC (Mat v ps) b =
+  sliceUpdateC (Mat v ps) b = forceRightP "sliceC' '[i] '[n]" $ do
     let i = fromN @i - 1
         (v1, v2) = V.splitAt i v
-     in case V.uncons v2 of
-          Just (_, v3) -> MatIU (v1 <> V.cons b v3) ps
-          Nothing -> programmError $ "sliceUpdateC: index " ++ show i ++ " out of bounds"
-instance FinT i n => SliceC '[i] (n ': m ': ns) where
-  sliceC (Mat v (_ :| ps)) =
+    case V.uncons v2 of
+          Just (_, v3) -> mkMat (v1 <> V.cons b v3) ps
+          Nothing -> Left $ "index " ++ show i ++ " out of bounds"
+instance FinC i n => SliceC '[i] (n ': m ': ns) where
+  sliceC (Mat v (_ :| ps)) =  forceRightP "sliceC' '[i] (n ': m ': ns)" $ do
     case ps of
-      m : ns ->
+      m : ns -> do
         let i = fromN @i - 1
             ps1 = m :| ns
             len1 = productPInt ps1
-         in MatIU (V.slice (i * len1) len1 v) ps1
-      [] -> programmError $ "sliceUpdateC: index " ++ show (fromN @i) ++ ": missing indices"
+        mkMat (V.slice (i * len1) len1 v) ps1
+      [] -> Left $ "index " ++ show (fromN @i) ++ ": missing indices"
 
   sliceUpdateC (Mat v w@(_ :| ps)) b =
     let i = fromN @i
@@ -1030,26 +1041,29 @@ instance FinT i n => SliceC '[i] (n ': m ': ns) where
      in MatIU (v1 <> mVec b <> v2) w
 
 instance
-  (FinT i n, SliceC (i1 ': is) (n1 ': ns)) =>
+  (FinC i n, SliceC (i1 ': is) (n1 ': ns)) =>
   SliceC (i ': i1 ': is) (n ': n1 ': ns)
   where
   sliceC w =
     sliceC @(i1 ': is) @(n1 ': ns) (sliceC @'[i] @(n ': n1 ': ns) w)
-  sliceUpdateC (Mat v w@(_ :| ps0)) b =
+  sliceUpdateC (Mat v w@(_ :| ps0)) b = forceRightP "sliceUpdateC' (i ': i1 ': is) (n ': m ': ns)" $ do
     -- carve out the piece that is to be updated and pass that down then patch it all back together
     case ps0 of
-      n1 : ns ->
+      n1 : ns -> do
         let i = fromN @i
             ps1 = n1 :| ns
             len = productPInt ps1
             v1 = V.slice 0 ((i - 1) * len) v
             v2 = V.slice (i * len) (productPInt w - i * len) v
-            m1 = MatIU (V.slice ((i - 1) * len) len v) ps1
-            mx = sliceUpdateC @(i1 ': is) @(n1 ': ns) m1 b
-         in MatIU (v1 <> mVec mx <> v2) w
-      [] -> programmError $ "sliceUpdateC: index " ++ show (fromN @i) ++ ": missing indices"
+        m1 <- mkMat (V.slice ((i - 1) * len) len v) ps1
+        let mx = sliceUpdateC @(i1 ': is) @(n1 ': ns) m1 b
+        mkMat (v1 <> mVec mx <> v2) w
+      [] -> Left $ "index " ++ show (fromN @i) ++ ": missing indices"
 
-instance (GL.TypeError ( 'GL.Text "too many indices 'is': length is > length ns")) => SliceC (i ': i1 ': is) '[n] where
+instance
+  GL.TypeError ( 'GL.Text "too many indices 'is': length is > length ns") =>
+  SliceC (i ': i1 ': is) '[n]
+  where
   sliceC = compileError "sliceC (2)"
   sliceUpdateC = compileError "sliceUpdateC (2)"
 
@@ -1063,7 +1077,7 @@ _row = ixSlice @'[i]
 -- | a lens for acccessing a column
 _col ::
   forall (i :: Nat) n m ns a.
-  (FinT i m) =>
+  (FinC i m) =>
   Lens' (Mat (n ': m ': ns) a) (Mat (n ': ns) a)
 _col = _transposeMat . _row @i
 
@@ -1108,14 +1122,14 @@ rows ::
   forall n m ns a.
   Mat (n ': m ': ns) a ->
   Vec n (Mat (m ': ns) a)
-rows w@(Mat _ (n :| ps)) =
+rows w@(Mat _ (n :| ps)) = forceRightP "rows" $
   case ps of
-    m : ns ->
-      let zs = frp $ chunkNVMat (unitsF @[] n) (m :| ns) w
-       in MatIU (V.fromList zs) (n :| [])
-    [] -> programmError "rows: missing indices"
+    m : ns -> do
+      zs <- chunkNVMat (unitsF @[] n) (m :| ns) w
+      mkMat (V.fromList zs) (n :| [])
+    [] -> Left "missing indices"
 
--- | unbust from rows @see 'rows'
+-- | unbust from rows see 'rows'
 unrows ::
   forall n m ns a.
   Vec n (Mat (m ': ns) a) ->
@@ -1184,14 +1198,14 @@ dot ::
   Mat2 n m a ->
   Mat2 m p b ->
   Mat2 n p d
-dot f g w1@(Mat _ (n :| ps1)) w2@(Mat _ (_ :| ps2)) =
+dot f g w1@(Mat _ (n :| ps1)) w2@(Mat _ (_ :| ps2)) = forceRightP "dot" $
   case (ps1, ps2) of
-    ([m], [p]) ->
-      let z1 = frp $ chunkNLen1 n m w1
-          z2 = N.transpose $ frp $ chunkNLen1 m p w2
-          w = liftA2 ((g . frp) .@ zipWithExact f) z1 z2
-       in MatIU (V.fromList $ N.toList w) (n :| [p])
-    o -> programmError $ "dot: missing indices " ++ show o
+    ([m], [p]) -> do
+      z1 <- chunkNLen1 n m w1
+      z2 <- N.transpose <$> chunkNLen1 m p w2
+      w <- sequenceA $ liftA2 (fmap g .@ zipWithExact f) z1 z2
+      mkMat (V.fromList $ N.toList w) (n :| [p])
+    o -> Left $ "missing indices " ++ show o
 
 -- | multiply two matrices together
 multMat ::
@@ -1205,7 +1219,7 @@ multMat = dot (*) sum1
 -- | delete a row
 deleteRow ::
   forall (i :: Nat) (n :: Nat) (ns :: [Nat]) a.
-  FinT i (1 GN.+ n) =>
+  FinC i (1 GN.+ n) =>
   Mat (1 GN.+ n ': ns) a ->
   Mat (n ': ns) a
 deleteRow = deleteRow' (finC @i @(1 GN.+ n))
@@ -1216,18 +1230,18 @@ deleteRow' ::
   Fin (1 GN.+ n) ->
   Mat (1 GN.+ n ': ns) a ->
   Mat (n ': ns) a
-deleteRow' (Fin (Pos i) _) (Mat v (sn :| ps)) =
-  let n = frp $ predP sn
-      n1 = productPInt ps
+deleteRow' (Fin (Pos i) _) (Mat v (sn :| ps)) = forceRightP "deleteRow'" $ do
+  n <- predP sn
+  let n1 = productPInt ps
       s = (i - 1) * n1
       v1 = V.slice 0 s v
       v2 = V.slice (s + n1) (productPInt (sn :| ps) - s - n1) v
-   in MatIU (v1 <> v2) (n :| ps)
+  mkMat (v1 <> v2) (n :| ps)
 
 -- | delete a row from a matrix
 insertRow ::
   forall i n m ns a.
-  FinT i (1 GN.+ n) =>
+  FinC i (1 GN.+ n) =>
   Mat (m ': ns) a ->
   Mat (n ': m ': ns) a ->
   Mat (1 GN.+ n ': m ': ns) a
@@ -1249,7 +1263,7 @@ insertRow' (Fin (Pos i) _) (Mat v0 _) (Mat v (p :| ps)) =
 -- | delete a column from a matrix (2d or higher)
 deleteCol ::
   forall (i :: Nat) (n :: Nat) (n1 :: Nat) ns a.
-  FinT i (1 GN.+ n1) =>
+  FinC i (1 GN.+ n1) =>
   Mat (n ': (1 GN.+ n1) ': ns) a ->
   Mat (n ': n1 ': ns) a
 deleteCol = deleteCol' (finC @i @(1 GN.+ n1))
@@ -1265,7 +1279,7 @@ deleteCol' fn = transposeMat @n1 @n . deleteRow' @n1 fn . transposeMat @n @(1 GN
 -- | insert a column into a mat (2d and above)
 insertCol ::
   forall (i :: Nat) (n :: Nat) (n1 :: Nat) ns a.
-  FinT i (1 GN.+ n1) =>
+  FinC i (1 GN.+ n1) =>
   Mat (n ': ns) a ->
   Mat (n ': n1 ': ns) a ->
   Mat (n ': (1 GN.+ n1) ': ns) a
@@ -1283,7 +1297,7 @@ insertCol' fn v = transposeMat @(1 GN.+ n1) @n . insertRow' fn v . transposeMat 
 -- | swaps mat rows (1d or more)
 swapRow ::
   forall (i :: Nat) (j :: Nat) (n :: Nat) ns a.
-  (FinT i n, FinT j n) =>
+  (FinC i n, FinC j n) =>
   Mat (n ': ns) a ->
   Mat (n ': ns) a
 swapRow = swapRow' (finC @i) (finC @j)
@@ -1313,7 +1327,7 @@ swapRow' (Fin ix _) (Fin jx _) z@(Mat v w@(_ :| ps)) =
 -- | swaps mat rows (2d or more)
 swapCol ::
   forall (i :: Nat) (j :: Nat) (n :: Nat) (n1 :: Nat) ns a.
-  (FinT i n1, FinT j n1) =>
+  (FinC i n1, FinC j n1) =>
   Mat (n ': n1 ': ns) a ->
   Mat (n ': n1 ': ns) a
 swapCol = swapCol' (finC @i) (finC @j)
@@ -1359,20 +1373,20 @@ appendH ::
   Mat (n ': m ': ns) a ->
   Mat (n ': m' ': ns) a ->
   Mat (n ': (m GN.+ m') ': ns) a
-appendH w@(Mat _ (n :| ps)) w1@(Mat _ (n' :| ps1))
-  | n == n' =
+appendH w@(Mat _ (n :| ps)) w1@(Mat _ (n' :| ps1)) = forceRightP "appendH" $
+  if n == n' then
       case (ps, ps1) of
-        ([], _) -> programmError "appendH:lhs missing indices"
-        (_, []) -> programmError "appendH:rhs missing indices"
+        ([], _) -> Left "lhs missing indices"
+        (_, []) -> Left "rhs missing indices"
         (m : ns, m' : ns')
-          | ns == ns' ->
-              let x1 = frp $ chunkNV (unitsF n) (productP (m :| ns)) (mVec w)
-                  x2 = frp $ chunkNV (unitsF @[] n) (productP (m' :| ns')) (mVec w1)
-                  ret = frp $ zipWithExact (<>) x1 x2
-                  ps2 = n :| ([m +! m'] <> ns)
-               in MatIU (V.concat ret) ps2
-          | otherwise -> programmError $ "appendH:ns/=ns' " ++ show (ns, ns')
-  | otherwise = programmError $ "appendH: n/=n' " ++ show (n, n')
+          | ns == ns' -> do
+              x1 <- chunkNV (unitsF n) (productP (m :| ns)) (mVec w)
+              x2 <- chunkNV (unitsF @[] n) (productP (m' :| ns')) (mVec w1)
+              ret <- zipWithExact (<>) x1 x2
+              let ps2 = n :| ([m +! m'] <> ns)
+              mkMat (V.concat ret) ps2
+          | otherwise -> Left $ "ns/=ns' " ++ show (ns, ns')
+  else Left $ "n/=n' " ++ show (n, n')
 
 -- | return a mat as a permutation of a list (1d only) todo: extend to multidimensions
 permutationsMat :: forall n a. Vec n a -> Mat2 (FacT n) n a
@@ -1441,7 +1455,7 @@ setsMat = flip (L.foldl' g)
 -- | convert a matrix to a nested tuple
 type MatTupleT :: [Nat] -> Type -> Type
 type family MatTupleT ns a where
-  MatTupleT '[] _ = GL.TypeError ('GL.Text "MatTupleT '[]: undefined for empty indices")
+  MatTupleT '[] _ = GL.TypeError ( 'GL.Text "MatTupleT '[]: undefined for empty indices")
   MatTupleT '[n] a = ListTupleT n a
   MatTupleT (n ': n1 ': ns) a = ListTupleT n (MatTupleT (n1 ': ns) a)
 
@@ -1465,14 +1479,14 @@ class MatTupleC ns a where
     -- | traversal over a well-formed nested tuple
     Traversal (MatTupleT ns a) (MatTupleT ns b) a b
 
-instance GL.TypeError ('GL.Text "MatTupleC '[]: undefined for empty indices") => MatTupleC '[] a where
+instance GL.TypeError ( 'GL.Text "MatTupleC '[]: undefined for empty indices") => MatTupleC '[] a where
   toTupleC = compileError "MatTupleC:toTupleC"
   fromTupleC = compileError "MatTupleC:fromTupleC"
   fmapTupleMatC = compileError "MatTupleC:fmapTupleMatC"
   traversalTupleMatC = compileError "MatTupleC:traversalTupleMatC"
 
 instance ListTupleCInternal n => MatTupleC '[n] a where
-  toTupleC  = toTupleCInternal
+  toTupleC = toTupleCInternal
   fromTupleC = fromTupleCInternal
   fmapTupleMatC = fmapTupleInternal
   traversalTupleMatC = traversalTupleCInternal
@@ -1563,22 +1577,22 @@ _transposeMat = iso transposeMat transposeMat
 
 -- | transpose a 2d or larger matrix
 transposeMat :: forall n m ns a. Mat (n ': m ': ns) a -> Mat (m ': n ': ns) a
-transposeMat w@(Mat _ (n :| ps)) =
+transposeMat w@(Mat _ (n :| ps)) = forceRightP "transposeMat" $
   case ps of
-    [] -> programmError "transposeMat"
-    m : ns ->
-      let ys = frp $ chunkNLen1 n (productP (m :| ns)) w
-          zs = N.transpose $ N.map (chunksOf1 (productP ns)) ys
-       in MatIU (V.fromList $ N.toList $ sconcat $ sconcat zs) (m :| (n : ns))
+    [] -> Left "transposeMat"
+    m : ns -> do
+      ys <- chunkNLen1 n (productP (m :| ns)) w
+      let zs = N.transpose $ N.map (chunksOf1 (productP ns)) ys
+      mkMat (V.fromList $ N.toList $ sconcat $ sconcat zs) (m :| (n : ns))
 
 -- | validate and convert from a nested list to a matrix
-nestedListToMatValidated :: forall ns x a. (x ~ ListNST ns a, ValidateNestedListC x (ValidateNestedListT x), MatConvertersC ns) => ListNST ns a -> Either String (Mat ns a)
+nestedListToMatValidated :: forall ns a x. (x ~ ListNST ns a, ValidateNestedListC x (ValidateNestedListT x), MatConvertersC ns) => ListNST ns a -> Either String (Mat ns a)
 nestedListToMatValidated w = do
   _ <- validateNestedList w
   nestedListToMatC w
 
 -- | validate and convert from a nested nonempty list to a matrix
-nestedNonEmptyToMatValidated :: forall ns x a. (x ~ NonEmptyNST ns a, ValidateNestedNonEmptyC x (ValidateNestedNonEmptyT x), MatConvertersC ns) => NonEmptyNST ns a -> Either String (Mat ns a)
+nestedNonEmptyToMatValidated :: forall ns a x. (x ~ NonEmptyNST ns a, ValidateNestedNonEmptyC x (ValidateNestedNonEmptyT x), MatConvertersC ns) => NonEmptyNST ns a -> Either String (Mat ns a)
 nestedNonEmptyToMatValidated w = do
   _ <- validateNestedNonEmpty w
   nestedNonEmptyToMatC w
@@ -1603,7 +1617,7 @@ class MatConvertersC ns where
   -- | convert a nested nonempty list to a 'Mat'
   nestedNonEmptyToMatC :: NonEmptyNST ns a -> Either String (Mat ns a)
 
-instance GL.TypeError ('GL.Text "MatConvertersC '[]: undefined for empty indices") => MatConvertersC '[] where
+instance GL.TypeError ( 'GL.Text "MatConvertersC '[]: undefined for empty indices") => MatConvertersC '[] where
   matToNestedVecC = compileError "MatConvertersC"
   nestedVecToMatC = compileError "MatConvertersC"
   matToNestedListC = compileError "MatConvertersC"
@@ -1611,14 +1625,14 @@ instance GL.TypeError ('GL.Text "MatConvertersC '[]: undefined for empty indices
   nestedListToMatC = compileError "MatConvertersC"
   nestedNonEmptyToMatC = compileError "MatConvertersC"
 
-instance PosT n => MatConvertersC '[n] where
+instance PosC n => MatConvertersC '[n] where
   matToNestedVecC = id
   nestedVecToMatC = id
   matToNestedListC = toListMat
   matToNestedNonEmptyC = toNonEmptyMat
   nestedListToMatC = matImpl True
   nestedNonEmptyToMatC = matImpl True . N.toList
-instance (PosT n, MatConvertersC (m ': ns)) => MatConvertersC (n ': m ': ns) where
+instance (PosC n, MatConvertersC (m ': ns)) => MatConvertersC (n ': m ': ns) where
   matToNestedVecC lst = fmap matToNestedVecC (rows @n lst)
   nestedVecToMatC lst@(Mat _ (n :| _)) =
     let zs@(Mat _ (m :| ns) :| _) = toNonEmptyMat $ fmap (nestedVecToMatC @(m ': ns)) lst
@@ -1632,7 +1646,7 @@ instance (PosT n, MatConvertersC (m ': ns)) => MatConvertersC (n ': m ': ns) whe
   nestedNonEmptyToMatC w = nonEmptyMatsToMat =<< traverse (nestedNonEmptyToMatC @(m ': ns)) w
 
 -- | create a matrix of one dimension higher from rows of a sub matrix
-nonEmptyMatsToMat :: forall n m ns a t. (Foldable1 t, PosT n) => t (Mat (m ': ns) a) -> Either String (Mat (n ': m ': ns) a)
+nonEmptyMatsToMat :: forall n m ns a t. (Foldable1 t, PosC n) => t (Mat (m ': ns) a) -> Either String (Mat (n ': m ': ns) a)
 nonEmptyMatsToMat (toNonEmpty -> xs@(Mat _ ps :| _)) = do
   let n = fromNP @n
   ret <- lengthExact1 n xs
@@ -1641,29 +1655,29 @@ nonEmptyMatsToMat (toNonEmpty -> xs@(Mat _ ps :| _)) = do
 -- | converts mat dimensions to a nested list
 type MatToNestedVecT :: [Nat] -> Type -> Type
 type family MatToNestedVecT ns a where
-  MatToNestedVecT '[] _ = GL.TypeError ('GL.Text "MatToNestedVecT '[]: undefined for empty indices")
+  MatToNestedVecT '[] _ = GL.TypeError ( 'GL.Text "MatToNestedVecT '[]: undefined for empty indices")
   MatToNestedVecT '[n] a = Vec n a
   MatToNestedVecT (n ': n1 ': ns) a = Vec n (MatToNestedVecT (n1 ': ns) a)
 
--- | type synonym for the result of nesting a matrix: @see 'toND'
+-- | type synonym for the result of nesting a matrix: see 'toND'
 type MatToNDT :: Nat -> [Nat] -> Type -> Type
 type MatToNDT i ns a = Mat (MatToMatNTA (NatToPeanoT i) ns) (Mat (MatToMatNTB (NatToPeanoT i) ns) a)
 
 -- | create a nested matrix going "i" levels down: noop is not supported ie 4D matrix to a 4D matrix
 matToNDImpl ::
   forall (i :: Nat) (ns :: [Nat]) a.
-  PosT i =>
+  PosC i =>
   Mat ns a ->
   MatToNDT i ns a
-matToNDImpl w@(Mat _ ps) =
+matToNDImpl w@(Mat _ ps) = forceRightP "matToNDImpl" $
   let i = fromNP @i
       (ps1, bs) = splitAt1 i ps
    in case bs of
-        y : ys ->
+        y : ys -> do
           let ps2 = y :| ys
-              xs = frp $ chunkNVMat (unitsF (productP ps1)) ps2 w
-           in MatIU (V.fromList xs) ps1
-        [] -> programmError "toND:missing indices to the right"
+          xs <- chunkNVMat (unitsF (productP ps1)) ps2 w
+          mkMat (V.fromList xs) ps1
+        [] -> Left "missing indices to the right"
 
 type MatToMatNTA :: Peano -> [Nat] -> [Nat]
 type family MatToMatNTA i ns where
@@ -1687,19 +1701,19 @@ type family MatToMatNTB i ns where
     GL.TypeError ( 'GL.Text "MatToMatNTB: depth is more than the number of indices")
   MatToMatNTB ( 'S ( 'S i)) (_ ': m ': ns) = MatToMatNTB ( 'S i) (m ': ns)
 
--- | create a nd matrix using a Nat @see 'toND
-toND :: forall i ns a. i <=! i => Mat ns a -> MatToNDT i ns a
+-- | create a nd matrix using a Nat see 'toND
+toND :: forall i ns a. PosC i => Mat ns a -> MatToNDT i ns a
 toND = matToNDImpl @i
 
--- | create a nested 1d matrix @see 'toND
+-- | create a nested 1d matrix see 'toND
 toVec :: Mat ns a -> MatToNDT 1 ns a
 toVec = toND @1
 
--- | create a nested 2d matrix @see 'toND
+-- | create a nested 2d matrix see 'toND
 toMat2 :: Mat ns a -> MatToNDT 2 ns a
 toMat2 = toND @2
 
--- | create a nested 3d matrix @see 'toND
+-- | create a nested 3d matrix see 'toND
 toMat3 :: Mat ns a -> MatToNDT 3 ns a
 toMat3 = toND @3
 
@@ -1714,13 +1728,13 @@ concatMat w =
 
 -- | gets the diagonal elements of a 2d or greater square matrix: the diagonal of a n * n * ns matrix results in a n * ns matrix
 diagonal :: Mat (n ': n ': ns) a -> Mat (n ': ns) a
-diagonal (Mat v (n :| ps)) =
+diagonal (Mat v (n :| ps)) = forceRightP "diagonal" $
   case ps of
-    _n : ns ->
+    _n : ns -> do
       let len = productPInt ns
           xs = map (\i -> V.slice (i * (unP n + 1) * len) len v) [0 .. unP n - 1]
-       in MatIU (V.concat xs) (n :| ns)
-    [] -> programmError "diagonal: missing indices"
+      mkMat (V.concat xs) (n :| ns)
+    [] -> Left "missing indices"
 
 -- | take a subset of a matrix using the start and end rows
 subsetRows ::
@@ -1728,13 +1742,13 @@ subsetRows ::
   DiffTC i j n =>
   Mat (n ': ns) a ->
   Mat (DiffT i j n ': ns) a
-subsetRows (Mat v (_ :| ns)) =
+subsetRows (Mat v (_ :| ns)) = forceRightP "subsetRows" $ do
   let i = fromNP @i
       j = fromNP @j
       n1 = (unP i - 1) * productPInt ns
-      n' = frp $ withOp2 ((-) . (+ 1)) j i
-      ps1 = n' :| ns
-   in MatIU (V.slice n1 (productPInt ps1) v) ps1
+  n' <- withOp2 ((-) . (+ 1)) j i
+  let ps1 = n' :| ns
+  mkMat (V.slice n1 (productPInt ps1) v) ps1
 
 -- todo use FinMat versions of subsetRows and subsetCols ie not just typelevel: need typelevel for the count of rows/cols so no point
 
@@ -1765,7 +1779,7 @@ toNonEmptyMat = toNonEmpty
 -- | specialised version of 'readMat' for 'Vec'
 readVec ::
   ( MatConvertersC '[n]
-  , PosT n
+  , PosC n
   , Read [a]
   ) =>
   ReadS (Vec n a)
@@ -1774,8 +1788,8 @@ readVec = P.readP_to_S (readMatP defShowOpts)
 -- | specialised version of 'readMat' for 'Mat2'
 readMat2 ::
   ( MatConvertersC '[n, m]
-  , PosT n
-  , PosT m
+  , PosC n
+  , PosC m
   , Read [[a]]
   ) =>
   ReadS (Mat2 n m a)
@@ -1941,105 +1955,105 @@ class Row10 s a | s -> a where
   _r10 :: Lens' s a
 
 -- | lens into the first row in a 2d or greater matrix
-instance FinT 1 n => Row1 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 1 n => Row1 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r1 = _row @1
 
 -- |  lens into the first element in a 1d matrix
-instance FinT 1 n => Row1 (Vec n a) a where
+instance FinC 1 n => Row1 (Vec n a) a where
   _r1 = _row @1
 
-instance (FinT 2 n) => Row2 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 2 n => Row2 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r2 = _row @2
 
-instance (FinT 2 n) => Row2 (Vec n a) a where
+instance FinC 2 n => Row2 (Vec n a) a where
   _r2 = _row @2
 
-instance (FinT 3 n) => Row3 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 3 n => Row3 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r3 = _row @3
 
-instance (FinT 3 n) => Row3 (Vec n a) a where
+instance FinC 3 n => Row3 (Vec n a) a where
   _r3 = _row @3
 
-instance (FinT 4 n) => Row4 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 4 n => Row4 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r4 = _row @4
 
-instance (FinT 4 n) => Row4 (Vec n a) a where
+instance FinC 4 n => Row4 (Vec n a) a where
   _r4 = _row @4
 
-instance (FinT 5 n) => Row5 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 5 n => Row5 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r5 = _row @5
 
-instance (FinT 5 n) => Row5 (Vec n a) a where
+instance FinC 5 n => Row5 (Vec n a) a where
   _r5 = _row @5
 
-instance (FinT 6 n) => Row6 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 6 n => Row6 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r6 = _row @6
 
-instance (FinT 6 n) => Row6 (Vec n a) a where
+instance FinC 6 n => Row6 (Vec n a) a where
   _r6 = _row @6
 
-instance (FinT 7 n) => Row7 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 7 n => Row7 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r7 = _row @7
 
-instance (FinT 7 n) => Row7 (Vec n a) a where
+instance FinC 7 n => Row7 (Vec n a) a where
   _r7 = _row @7
 
-instance (FinT 8 n) => Row8 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 8 n => Row8 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r8 = _row @8
 
-instance (FinT 8 n) => Row8 (Vec n a) a where
+instance FinC 8 n => Row8 (Vec n a) a where
   _r8 = _row @8
 
-instance (FinT 9 n) => Row9 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 9 n => Row9 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r9 = _row @9
 
-instance (FinT 9 n) => Row9 (Vec n a) a where
+instance FinC 9 n => Row9 (Vec n a) a where
   _r9 = _row @9
 
-instance (FinT 10 n) => Row10 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
+instance FinC 10 n => Row10 (Mat (n ': m ': ns) a) (Mat (m ': ns) a) where
   _r10 = _row @10
 
-instance (FinT 10 n) => Row10 (Vec n a) a where
+instance FinC 10 n => Row10 (Vec n a) a where
   _r10 = _row @10
 
 -- | lens into column 1 of a matrix
-_c1 :: FinT 1 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c1 :: FinC 1 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c1 = _col @1
 
 -- | lens into column 2 of a matrix
-_c2 :: FinT 2 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c2 :: FinC 2 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c2 = _col @2
 
 -- | lens into column 3 of a matrix
-_c3 :: FinT 3 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c3 :: FinC 3 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c3 = _col @3
 
 -- | lens into column 4 of a matrix
-_c4 :: FinT 4 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c4 :: FinC 4 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c4 = _col @4
 
 -- | lens into column 5 of a matrix
-_c5 :: FinT 5 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c5 :: FinC 5 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c5 = _col @5
 
 -- | lens into column 6 of a matrix
-_c6 :: FinT 6 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c6 :: FinC 6 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c6 = _col @6
 
 -- | lens into column 7 of a matrix
-_c7 :: FinT 7 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c7 :: FinC 7 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c7 = _col @7
 
 -- | lens into column 8 of a matrix
-_c8 :: FinT 8 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c8 :: FinC 8 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c8 = _col @8
 
 -- | lens into column 9 of a matrix
-_c9 :: FinT 9 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c9 :: FinC 9 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c9 = _col @9
 
 -- | lens into column 10 of a matrix
-_c10 :: FinT 10 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
+_c10 :: FinC 10 m => Lens' (Mat (n ': (m : ns)) a) (Mat (n ': ns) a)
 _c10 = _col @10
 
 -- | marker representing the last value in a 1d matrix ie singleton
@@ -2100,11 +2114,11 @@ instance
   where
   consMat =
     iso
-      ( \(Mat v0 (sn :| ps)) ->
-          let n = frp $ predP sn
-           in case V.uncons v0 of -- stay within Vector
-                Nothing -> programmError "consMat '[1 GN.+ n]: no data"
-                Just (a, v) -> (a, MatIU v (n :| ps))
+      ( \(Mat v0 (sn :| ps)) -> forceRightP "consMat '[n]" $ do
+          n <- predP sn
+          case V.uncons v0 of -- stay within Vector
+                Nothing -> Left "no data"
+                Just (a, v) -> (a,) <$> mkMat v (n :| ps)
       )
       (\(a, Mat v (p :| ps)) -> MatIU (V.cons a v) (succP p :| ps))
 
@@ -2119,10 +2133,10 @@ instance
   where
   consMat =
     iso
-      ( \(Mat v (_ :| ps)) ->
+      ( \(Mat v (_ :| ps)) -> forceRightP "consMat '(1 ': n1 ': ns)" $
           case ps of
-            m : ns -> (MatIU v (m :| ns), EofN)
-            [] -> programmError "consMat (1 ': m ': ns): missing indices"
+            m : ns -> (,EofN) <$> mkMat v (m :| ns)
+            [] -> Left "missing indices"
       )
       (\(Mat v ps, EofN) -> MatIU v (_1P N.<| ps))
 
@@ -2137,17 +2151,15 @@ instance
   where
   consMat =
     iso
-      ( \(Mat v (sn :| ps)) ->
+      ( \(Mat v (sn :| ps)) -> forceRightP "consMat '(n ': m ': ns)" $ do
           case ps of
-            m : ns ->
-              let n = frp $ predP sn
-                  ps1 = m :| ns
+            m : ns -> do
+              n <- predP sn
+              let ps1 = m :| ns
                   ps2 = n :| (m : ns)
                   (v1, v2) = V.splitAt (productPInt ps1) v
-               in ( MatIU v1 ps1
-                  , MatIU v2 ps2
-                  )
-            [] -> programmError "consMat:(1 GN.+ n ': m ': ns): missing indices"
+              liftA2 (,) (mkMat v1 ps1) (mkMat v2 ps2)
+            [] -> Left "missing indices"
       )
       (\(Mat v1 _, Mat v2 (p2 :| ps2)) -> MatIU (v1 <> v2) (succP p2 :| ps2))
 
@@ -2181,22 +2193,22 @@ instance
   where
   snocMat =
     iso
-      ( \(Mat v0 (sn :| ps)) ->
-          let n = frp $ predP sn
-           in case V.unsnoc v0 of
-                Nothing -> programmError "snocMat '[1 GN.+ n]: no data"
-                Just (v, a) -> (MatIU v (n :| ps), a)
+      ( \(Mat v0 (sn :| ps)) -> forceRightP "snocMat '[n]" $ do
+          n <- predP sn
+          case V.unsnoc v0 of
+                Nothing -> Left "no data"
+                Just (v, a) -> (,a) <$> mkMat v (n :| ps)
       )
       (\(Mat v (p :| ps), a) -> MatIU (V.snoc v a) (succP p :| ps))
 
 instance {-# OVERLAPPING #-} SnocMatC (1 ': n1 ': ns) a b where
   snocMat =
     iso
-      ( \(Mat v (_ :| ps)) ->
+      ( \(Mat v (_ :| ps)) -> forceRightP "snocMat '(1 ': n1 ': ns)" $ do
           case ps of
             m : ns ->
-              (EofN, MatIU v (m :| ns))
-            [] -> programmError "snocMat '[1 GN.+ n]: missing indices"
+              (EofN,) <$> mkMat v (m :| ns)
+            [] -> Left "missing indices"
       )
       (\(EofN, Mat v ps) -> MatIU v (_1P N.<| ps))
 
@@ -2209,17 +2221,15 @@ instance
   where
   snocMat =
     iso
-      ( \(Mat v (sn :| ps)) ->
+      ( \(Mat v (sn :| ps)) -> forceRightP "snocMat '(n ': m ': ns)" $ do
           case ps of
-            m : ns ->
-              let n = frp $ predP sn
-                  ps1 = m :| ns
+            m : ns -> do
+              n <- predP sn
+              let ps1 = m :| ns
                   ps2 = n :| (m : ns)
                   (v2, v1) = V.splitAt (productPInt ps2) v
-               in ( MatIU v2 ps2
-                  , MatIU v1 ps1
-                  )
-            [] -> programmError "snocMat:(1 GN.+ n ': m ': ns): missing indices"
+              liftA2 (,) (mkMat v2 ps2) (mkMat v1 ps1)
+            [] -> Left "missing indices"
       )
       (\(Mat v1 (p1 :| ps1), Mat v2 _) -> MatIU (v1 <> v2) (succP p1 :| ps1))
 
@@ -2234,13 +2244,13 @@ rowsToMat w1@(Mat _ (x :| _)) w2@(Mat _ (_ :| ps)) =
 
 -- | get a row from a matrix using a concrete index see '_row''
 indexRow :: Fin n -> Mat (n ': m ': ns) a -> Mat (m ': ns) a
-indexRow (Fin (Pos i) _n) (Mat v (_ :| ps)) =
+indexRow (Fin (Pos i) _n) (Mat v (_ :| ps)) = forceRightP "indexRow" $
   case ps of
-    m : ns ->
+    m : ns -> do
       let s = (i - 1) * len
           len = productPInt (m :| ns)
-       in MatIU (V.slice s len v) (m :| ns)
-    [] -> programmError "indexRow: missing indices"
+      mkMat (V.slice s len v) (m :| ns)
+    [] -> Left "missing indices"
 
 -- | 'Data.List.scanr' for a vector
 scanrVec :: forall n a b. (a -> b -> b) -> b -> Vec n a -> Vec (n GN.+ 1) b
@@ -2252,14 +2262,14 @@ scanlVec :: forall n a b. (b -> a -> b) -> b -> Vec n a -> Vec (n GN.+ 1) b
 scanlVec f c (Mat v (p :| ps)) =
   MatIU (V.scanl' f c v) (succP p :| ps)
 
-{- | @see 'Data.Vector.postscanr''
+{- | see 'Data.Vector.postscanr''
  concrete version of 'Primus.Fold.postscanr
 -}
 postscanrMat :: forall ns a b. (a -> b -> b) -> b -> Mat ns a -> Mat ns b
 postscanrMat f c (Mat v ps) =
   MatIU (V.postscanr' f c v) ps
 
-{- | @see 'Data.Vector.postscanl''
+{- | see 'Data.Vector.postscanl''
  concrete version of 'Primus.Fold.postscanl'
 -}
 postscanlMat :: forall ns a b. (b -> a -> b) -> b -> Mat ns a -> Mat ns b
@@ -2305,3 +2315,54 @@ dim9 = id
 -- | matrix of dimension 10
 dim10 :: Mat '[n, m, p, q, r, s, t, u, v, w] a -> Mat '[n, m, p, q, r, s, t, u, v, w] a
 dim10 = id
+
+-- | left rotate a matrix
+rotateLeft :: Mat2 n m a -> Mat2 m n a
+rotateLeft = unrows . sequence1 . fmap reverseT . rows
+
+-- | right rotate a matrix
+rotateRight :: Mat2 n m a -> Mat2 m n a
+rotateRight = unrows . fmap reverseT . sequence1 . rows
+
+cofactorsL :: forall a . Pos -> [a] -> [(a, [a])]
+cofactorsL n xs
+  | n <= _2P = programmError $ "cofactorsL: n is too small: must be greater than 2 but found " ++ show n
+  | len /= len' = programmError $ "cofactorsL: wrong length: expected " ++ show len' ++ " but found " ++ show len
+  | otherwise =
+    let (h,t) = splitAt (unP n) xs
+    in foldl' (\z (i,a) -> (a,deleteColumnL n i t):z) [] (zip [0..] h)
+  where len = length xs
+        len' = unP (n *! n)
+
+-- | delete column "i" from a list of width "n"
+deleteColumnL :: forall a . Pos -> Int -> [a] -> [a]
+deleteColumnL (Pos n) i ys =
+  let (as,bs) = splitAt i ys
+  in as <> concat (L.unfoldr g bs)
+  where
+    g :: [a] -> Maybe ([a],[a])
+    g = list Nothing (\_ -> Just . splitAt (n-1))
+
+determinantL :: forall a . Num a => Pos -> [a] -> a
+determinantL n m0
+  | len /= unP (n *! n) = programmError $ "determinantL: wrong length n=" ++ show n ++ " m=" ++ show len
+  | otherwise =
+  case m0 of
+   [a] -> a
+   [a,b,c,d] -> a * d - b * c
+   _o ->
+    snd $ foldl' f (True, 0) (cofactorsL n m0)
+   where
+    f :: (Bool, a) -> (a, [a]) -> (Bool, a)
+    f (sgn, tot) (a, m) =
+      let val = bool id negate sgn a * determinantL (frp $ predP n) m
+       in (not sgn, tot + val)
+    len = length m0
+
+-- | get the determinant of a matrix
+determinant :: Num a => Mat2 n n a -> a
+determinant (Mat v (n :| _)) =
+  bool negate id (n <= _2P) $ determinantL n (V.toList v)
+
+
+

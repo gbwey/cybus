@@ -217,13 +217,13 @@ suite =
           @?= ["0@{2,3,5}", "5@{2,3,5}", "10@{2,3,5}", "15@{2,3,5}", "20@{2,3,5}", "25@{2,3,5}"]
     , testCase "nonEmptyToFinMat'" $
         nonEmptyToFinMat' (_1P :| [_4P, _3P]) (_1P :| [_3P, _4P])
-          @?= Left "nonEmptyToFinMat:These es=outofbounds (4P,3P) as=(1P,1P) :| [(3P,4P)]"
+          @?= Left "nonEmptyToFinMat:These es=outofbounds (_4P,_3P) as=(_1P,_1P) :| [(_3P,_4P)]"
     , testCase "nonEmptyToFinMat'" $
         nonEmptyToFinMat' (_1P :| [_2P, _3P, _6P]) (_1P :| [_3P, _4P])
-          @?= Left "nonEmptyToFinMat:too many indices: expected 3 is=1P :| [2P,3P,6P] ns=1P :| [3P,4P]"
+          @?= Left "nonEmptyToFinMat:too many indices: expected 3 is=_1P :| [_2P,_3P,_6P] ns=_1P :| [_3P,_4P]"
     , testCase "nonEmptyToFinMat'" $
         nonEmptyToFinMat' (_1P :| [_2P]) (_1P :| [_3P, _4P])
-          @?= Left "nonEmptyToFinMat:not enough indices: expected 3 is=1P :| [2P] ns=1P :| [3P,4P]"
+          @?= Left "nonEmptyToFinMat:not enough indices: expected 3 is=_1P :| [_2P] ns=_1P :| [_3P,_4P]"
     , testCase "nonEmptyToFinMat'" $
         nonEmptyToFinMat' (_3P :| [_1P, _4P]) (_3P :| [_8P, _7P])
           @?= Right (FinMatU @'[3, 8, 7] 115 (_3P :| [_8P, _7P]))
@@ -434,20 +434,29 @@ suite =
         toInteger1 (FinMatU @'[2, 3, 4] 12 (_2P :| [_3P, _4P]))
           @?= 12
     , testCase "index lenses" $
-         finMatC @'[2,5,3,7] @'[2,12,13,8] ^. _i1
-           @?= FinU @2 _2P _2P
+        finMatC @'[2, 5, 3, 7] @'[2, 12, 13, 8] ^. _i1
+          @?= FinU @2 _2P _2P
     , testCase "index lenses" $
-         finMatC @'[2,5,3,7] @'[2,12,13,8] ^. _i2
-           @?= FinU @12 _5P _12P
+        finMatC @'[2, 5, 3, 7] @'[2, 12, 13, 8] ^. _i2
+          @?= FinU @12 _5P _12P
     , testCase "index lenses" $
-         finMatC @'[2,5,3,7] @'[2,12,13,8] ^. _i4
-           @?= FinU @8 _7P _8P
+        finMatC @'[2, 5, 3, 7] @'[2, 12, 13, 8] ^. _i4
+          @?= FinU @8 _7P _8P
     , testCase "finMat finMatC" $
-         finMat @'[2,12,13,8] (6 + 2*8 + 4*13*8 + 1*12*13*8)
-         @?= Right (finMatC @'[2,5,3,7] @'[2,12,13,8])
+        finMat @'[2, 12, 13, 8] (6 + 2 * 8 + 4 * 13 * 8 + 1 * 12 * 13 * 8)
+          @?= Right (finMatC @'[2, 5, 3, 7] @'[2, 12, 13, 8])
     , testCase "finMat finMatC" $
-         finMat @'[21] 0
-         @?= Right (finMatC @'[1] @'[21])
+        finMat @'[21] 0
+          @?= Right (finMatC @'[1] @'[21])
+    , testCase "_finMatCons" $
+      (finMatC @'[2,1] @'[7,1] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[1] @'[1])
+    , testCase "_finMatCons" $
+      (finMatC @'[2,1] @'[7,4] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[1] @'[4])
+    , testCase "_finMatCons" $
+      (finMatC @'[2,2] @'[7,2] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[2] @'[2])
+
+    , testCase "_finMatCons" $
+      (finMatC @'[2,4] @'[7,4] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[4] @'[4])
     ]
 
 fmi237' :: NonEmpty (FinMat '[2, 3, 7])
@@ -461,3 +470,4 @@ fmiNS' = frp $ traverse (nonEmptyToFinMat @ns <=< toPositives) (fmiNS (fmap unP 
 
 fmiNS :: NonEmpty Int -> NonEmpty (NonEmpty Int)
 fmiNS = traverse (N.fromList . enumFromTo 1)
+
