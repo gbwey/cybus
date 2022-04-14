@@ -1,17 +1,19 @@
-[cybus](http://hackage.haskell.org/package/cybus) is a library for handling type-safe multidimensional matrices. 
+# cybus: a library for handling type-safe multidimensional matrices. 
+
+[![Hackage](https://img.shields.io/hackage/v/cybus.svg?colorB=5d0ef0&style=flat)](https://hackage.haskell.org/package/cybus)
 
 Some key features include that it has value-level indices, rather than only type-level
 every dimension must be greater than zero
 it provides type-safe lenses and isomorphisms for accessing a matrix
-read and show instances have special handling of one-dimensional (Vec) and two-dimensional (Mat2) matrices
+read and show instances have special handling for one-dimensional (Vec) and two-dimensional (Mat2) matrices
 it provides the ability to converters between nested lists and matrices
 as well as between nested tuples and matrices
 
-There are three main types on which the library is based:
+There are three main types used by this library:
 
-1.       Fin: is an index for a single column/row
-2.       FinMat: is an index for a matrix
-3.       Mat: is a multidimensional matrix
+1. Fin: is an index for a single column/row
+2. FinMat: is an index for a matrix
+3. Mat: is a multidimensional matrix
 
 Among the instances that Mat supports are:
 * Read

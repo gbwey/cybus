@@ -723,7 +723,7 @@ mapLeafS ::
   c ->
   Mat ns a ->
   (c, Mat (TP.InitT ns) b)
-mapLeafS f c0 = swap . flip S.runState c0 . traverseLeafC (\i a -> S.state $ \c -> swap (f i c a))
+mapLeafS f c0 = swap . flip S.runState c0 . traverseLeafC (\i a -> S.state (\c -> swap (f i c a)))
 
 -- | map over a nested leaf matrix only allowing changes to "a" and access to user state
 mapLeafSimpleS ::
@@ -733,7 +733,7 @@ mapLeafSimpleS ::
   Mat ns a ->
   (c, Mat ns b)
 mapLeafSimpleS f c0 =
-  second fromLeavesInternalC . swap . flip S.runState c0 . traverseLeafC (\i a -> S.state $ \c -> swap (f i c a))
+  second fromLeavesInternalC . swap . flip S.runState c0 . traverseLeafC (\i a -> S.state (\c -> swap (f i c a)))
 
 -- | fold over a nested leaf matrix
 foldLeaf ::
@@ -784,7 +784,7 @@ instance LeafC (n ': m ': ns) where
       m : ns ->
         let (ny0, nx) = unsnoc1 (m :| ns)
             ny = n :| ny0
-            g x = S.state $ \i -> (f (frp $ mkFinMat i (n :| m : ns)) x, i + unP nx)
+            g x = S.state (\i -> (f (frp $ mkFinMat i (n :| m : ns)) x, i + unP nx))
             zs = frp $ chunkNVMat (units1 (productP ny)) (nx :| []) w
             tbs = sequenceA $ flip S.evalState 0 $ traverse g zs
          in (\zz -> MatIU (V.fromList (N.toList zz)) ny) <$> tbs
