@@ -449,14 +449,13 @@ suite =
         finMat @'[21] 0
           @?= Right (finMatC @'[1] @'[21])
     , testCase "_finMatCons" $
-      (finMatC @'[2,1] @'[7,1] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[1] @'[1])
+        (finMatC @'[2, 1] @'[7, 1] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[1] @'[1])
     , testCase "_finMatCons" $
-      (finMatC @'[2,1] @'[7,4] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[1] @'[4])
+        (finMatC @'[2, 1] @'[7, 4] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[1] @'[4])
     , testCase "_finMatCons" $
-      (finMatC @'[2,2] @'[7,2] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[2] @'[2])
-
+        (finMatC @'[2, 2] @'[7, 2] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[2] @'[2])
     , testCase "_finMatCons" $
-      (finMatC @'[2,4] @'[7,4] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[4] @'[4])
+        (finMatC @'[2, 4] @'[7, 4] ^. _finMatCons) @?= (finC @2 @7, finMatC @'[4] @'[4])
     ]
 
 fmi237' :: NonEmpty (FinMat '[2, 3, 7])
@@ -470,4 +469,3 @@ fmiNS' = frp $ traverse (nonEmptyToFinMat @ns <=< toPositives) (fmiNS (fmap unP 
 
 fmiNS :: NonEmpty Int -> NonEmpty (NonEmpty Int)
 fmiNS = traverse (N.fromList . enumFromTo 1)
-

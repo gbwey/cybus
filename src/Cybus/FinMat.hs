@@ -321,12 +321,13 @@ instance
   NSRangeC 'Z (n ': ns)
 
 -- | iso that conses out the 'Fin' from 'FinMat'
-_finMatCons :: forall n n1 ns . (NS (n1 ': ns), PosC n) => Iso' (FinMat (n ': n1 ': ns)) (Fin n, FinMat (n1 ': ns))
+_finMatCons :: forall n n1 ns. (NS (n1 ': ns), PosC n) => Iso' (FinMat (n ': n1 ': ns)) (Fin n, FinMat (n1 ': ns))
 _finMatCons = iso f g
-  where f (FinMat is (_:|ns)) = forceRightP "_finMatCons lhs" $ do
-           let (a,Pos b) = divModNextP is (productP ns)
-           (,) <$> fin @n (a+1) <*> finMat @(n1 ': ns) (b-1)
-        g (Fin (Pos i) _, FinMat is ns) = forceRightP "_finMatCons rhs" $ finMat @(n ': n1 ': ns) (is + (i-1) * productPInt ns)
+ where
+  f (FinMat is (_ :| ns)) = forceRightP "_finMatCons lhs" $ do
+    let (a, Pos b) = divModNextP is (productP ns)
+    (,) <$> fin @n (a + 1) <*> finMat @(n1 ': ns) (b - 1)
+  g (Fin (Pos i) _, FinMat is ns) = forceRightP "_finMatCons rhs" $ finMat @(n ': n1 ': ns) (is + (i - 1) * productPInt ns)
 
 -- | a lens for accessing the "i" index in a indices of FinMat
 _finMatFin ::
@@ -342,12 +343,13 @@ finMatFinSet ::
   FinMat ns ->
   Fin n ->
   FinMat ns
-finMatFinSet fm@(FinMat _ ns) (Fin ind _) = forceRightP "finMatFinSet" $
-  let i = fromNP @i
-      ps = finMatToNonEmpty fm
-   in case setAt1 i ind ps of
-        Nothing -> Left $ "index out of bounds: index is " ++ show i
-        Just ps1 -> nonEmptyToFinMat' ps1 ns
+finMatFinSet fm@(FinMat _ ns) (Fin ind _) =
+  forceRightP "finMatFinSet" $
+    let i = fromNP @i
+        ps = finMatToNonEmpty fm
+     in case setAt1 i ind ps of
+          Nothing -> Left $ "index out of bounds: index is " ++ show i
+          Just ps1 -> nonEmptyToFinMat' ps1 ns
 
 {- | get the 'Fin' at index "i" from FinMat
  must rely on FinMat to get "n at index i "which saves us pulling "n" from the typelevel ie we can omit PosC n
@@ -357,13 +359,14 @@ finMatFinGet ::
   (PosC i, NSRangeC (NatToPeanoT i) ns) =>
   FinMat ns ->
   Fin n
-finMatFinGet fm@(FinMat _ ns) = forceRightP "finMatFinGet" $
-  let i = fromNP @i
-      ps = finMatToNonEmpty fm
-   in case (at1 i ps, at1 i ns) of
-        (Nothing, _) -> Left "invalid index!"
-        (_, Nothing) -> Left $ "FinMat is corrupt: doesnt have the index at " ++ show i ++ " " ++ show fm
-        (Just p, Just n) -> mkFin p n
+finMatFinGet fm@(FinMat _ ns) =
+  forceRightP "finMatFinGet" $
+    let i = fromNP @i
+        ps = finMatToNonEmpty fm
+     in case (at1 i ps, at1 i ns) of
+          (Nothing, _) -> Left "invalid index!"
+          (_, Nothing) -> Left $ "FinMat is corrupt: doesnt have the index at " ++ show i ++ " " ++ show fm
+          (Just p, Just n) -> mkFin p n
 
 -- | lens for index 1
 _i1 :: Lens' (FinMat (n ': ns)) (Fin n)
@@ -404,4 +407,3 @@ _i9 = _finMatFin @9
 -- | lens for index 10
 _i10 :: Lens' (FinMat (n1 ': n2 ': n3 ': n4 ': n5 ': n6 ': n7 ': n8 ': n9 ': n ': ns)) (Fin n)
 _i10 = _finMatFin @10
-

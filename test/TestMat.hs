@@ -1,9 +1,9 @@
 {-# OPTIONS -Wno-orphans #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
@@ -29,9 +29,11 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as N
 import qualified Data.Monoid as MM
 import Data.Pos
+import Data.Proxy
 import Data.Semigroup.Foldable
 import qualified Data.Vector as V
 import GHC.TypeNats (Nat)
+import qualified GHC.TypeNats as GN
 import Primus.Enum
 import Primus.Error
 import Primus.Fold
@@ -45,8 +47,6 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Test.Tasty.QuickCheck as TQ
 import Unsafe.Coerce
-import qualified GHC.TypeNats as GN
-import Data.Proxy
 
 instance (NS ns, Arbitrary a) => Arbitrary (Mat ns a) where
   arbitrary = sequenceA $ mat @ns (repeat arbitrary)
@@ -699,7 +699,7 @@ suite =
         indexRow (fr $ fin @7 7) (gen' @(NN 73) id)
           @?= vec' [[7, 1], [7, 2], [7, 3]]
     , testCase "readVec" $
-        readVec @5 @Int (show (vec' @5 [1::Int ..5])) @?= [(vec' [1 .. 5], "")]
+        readVec @5 @Int (show (vec' @5 [1 :: Int .. 5])) @?= [(vec' [1 .. 5], "")]
     , testCase "readMat2" $
         let m = mat' @'[3, 7] ['a' .. 'u']
          in readMat2 @3 @7 @Char (show m ++ "xyz") @?= [(m, "xyz")]
@@ -707,11 +707,11 @@ suite =
         let m = mat' @'[7] ['a' .. 'g']
          in readVec @7 @Char (show m ++ " xyz") @?= [(m, " xyz")]
     , testCase "readMat" $
-        let m = mat' @'[3,7,2] [1::Int .. 42]
-         in readMat @'[3,7,2] @Int (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
+        let m = mat' @'[3, 7, 2] [1 :: Int .. 42]
+         in readMat @'[3, 7, 2] @Int (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
     , testCase "readMat12" $
-        let m = mat' @'[3,7,2] [1::Int .. 42]
-         in readMat @'[3,7,2] @Int (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
+        let m = mat' @'[3, 7, 2] [1 :: Int .. 42]
+         in readMat @'[3, 7, 2] @Int (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
     , testCase "readMat3456" $
         let m = toMat2 (mm @(NN 3456))
          in readMat2 @3 @4 @(Mat2 5 6 Int) (show m ++ "xyz") @?= [(m, "xyz")] -- dont need type application but here we have inference
@@ -819,7 +819,7 @@ suite =
         unfoldrRep @(Vec 5) (\i s -> (drop 1 s, (fmPos i, head s))) ['a' .. 'h']
           @?= ("fgh", vec' @5 [(0, 'e'), (1, 'd'), (2, 'c'), (3, 'b'), (4, 'a')])
     , testCase "fillTraversable" $
-        fillTraversable @(MatN 234) @Int (pure ()) [1.. 40]
+        fillTraversable @(MatN 234) @Int (pure ()) [1 .. 40]
           @?= Right ([25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40], mat' @'[2, 3, 4] [1 .. 24])
     , testCase "toInteger1" $
         toInteger1 (pure @(Mat2 4 2) EQ)
@@ -939,29 +939,26 @@ suite =
         withN3 2 3 4 (\(_ :: z n) (_ :: z m) (_ :: z q) -> fromNSP @'[n, m, q])
           @?= _2P :| [_3P, _4P]
     , testCase "withN3" $
-        let z = withN 4 $ \(_ :: p n) -> show (mat2 @2 @n @Int [1..] ^. _row @1)
+        let z = withN 4 $ \(_ :: p n) -> show (mat2 @2 @n @Int [1 ..] ^. _row @1)
          in read @(Vec 4 Int) z @?= vec' @4 [1 .. 4]
     , testCase "withN3" $
         let z = withN 4 $ \(_ :: p n) -> show (mat2 @2 @n @Int [1 ..] ^. _row @2)
          in read @(Vec 4 Int) z @?= vec' @4 [5 .. 8]
-
     , testCase "withNMin3" $
-         let z = withNMin3 5 (\(_ :: p n) -> withNMin3 4 (\(_ :: p m) -> show (mat2 @n @m [1::Int ..] ^. _c2)))
-         in read @(Vec 5 Int) z @?= vec' @5 [2,6,10,14,18]
-
+        let z = withNMin3 5 (\(_ :: p n) -> withNMin3 4 (\(_ :: p m) -> show (mat2 @n @m [1 :: Int ..] ^. _c2)))
+         in read @(Vec 5 Int) z @?= vec' @5 [2, 6, 10, 14, 18]
     , testCase "rotateLeft rotateRight" $
         let z = mm @(NN 57)
-        in rotateLeft (rotateRight z) @?= z
+         in rotateLeft (rotateRight z) @?= z
     , testCase "rotateLeft" $
         rotateLeft (mm @(NN 35))
-          @?= mat2' @5 @3 [5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-      ,testCase "rotateRight" $
+          @?= mat2' @5 @3 [5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11]
+    , testCase "rotateRight" $
         rotateRight (mm @(NN 35))
-          @?= mat2' @5 @3 [11,6,1,12,7,2,13,8,3,14,9,4,15,10,5]
+          @?= mat2' @5 @3 [11, 6, 1, 12, 7, 2, 13, 8, 3, 14, 9, 4, 15, 10, 5]
     , testCase "rotateRight transpose rotateRight" $
         let z = mm @(NN 57)
-        in (transposeMat . rotateLeft . transposeMat) z  @?= rotateRight z
-
+         in (transposeMat . rotateLeft . transposeMat) z @?= rotateRight z
     , testCase "determinant" $
         determinant (mat2' @3 @3 @Int [2, -3, 1, 2, 0, -1, 1, 4, 5])
           @?= 49
@@ -980,20 +977,26 @@ suite =
     , testCase "determinant" $
         determinant (mat2' @2 @2 @Int [1, 2, 3, 4])
           @?= (-2)
-
     , testCase "determinant" $
         determinant (mat2' @1 @1 @Int [-5])
           @?= (-5)
     , testCase "deleteColumnL" $
-        deleteColumnL _2P 1 [1,2::Int] @?= [1]
+        deleteColumnL _2P 1 [1, 2 :: Int] @?= [1]
     , testCase "deleteColumnL" $
-        deleteColumnL _2P 0 [1,2::Int] @?= [2]
+        deleteColumnL _2P 0 [1, 2 :: Int] @?= [2]
     , testCase "deleteColumnL" $
-        deleteColumnL _3P 1 [1::Int .. 12] @?= [1,3,4,6,7,9,10,12]
+        deleteColumnL _3P 1 [1 :: Int .. 12] @?= [1, 3, 4, 6, 7, 9, 10, 12]
     , testCase "deleteColumnL" $
-        deleteColumnL _2P 1 [1..10::Int] @?=  [1,3,5,7,9]
+        deleteColumnL _2P 1 [1 .. 10 :: Int] @?= [1, 3, 5, 7, 9]
     , testCase "deleteColumnL" $
-        deleteColumnL _1P 0 [1::Int] @?= []
+        deleteColumnL _1P 0 [1 :: Int] @?= []
+
+    , testCase "selectMat" $
+        selectMat ((12::Int) .: 13 .: 14 .| 15)
+          @?= mat2' @4 @3 [13,14,15,12,14,15,12,13,15,12,13,14]
+    , testCase "selectMat" $
+        selectMat ((12::Int) .| 15)
+          @?= mat2' @2 @1 [15,12]
     ]
 
 suiteCheckers :: TestTree
@@ -1013,7 +1016,7 @@ fmi237 :: NonEmpty (NonEmpty Int)
 fmi237 = fmap N.fromList ([1, 1, 1] :| [[1, 1, 2], [1, 1, 3], [1, 1, 4], [1, 1, 5], [1, 1, 6], [1, 1, 7], [1, 2, 1], [1, 2, 2], [1, 2, 3], [1, 2, 4], [1, 2, 5], [1, 2, 6], [1, 2, 7], [1, 3, 1], [1, 3, 2], [1, 3, 3], [1, 3, 4], [1, 3, 5], [1, 3, 6], [1, 3, 7], [2, 1, 1], [2, 1, 2], [2, 1, 3], [2, 1, 4], [2, 1, 5], [2, 1, 6], [2, 1, 7], [2, 2, 1], [2, 2, 2], [2, 2, 3], [2, 2, 4], [2, 2, 5], [2, 2, 6], [2, 2, 7], [2, 3, 1], [2, 3, 2], [2, 3, 3], [2, 3, 4], [2, 3, 5], [2, 3, 6], [2, 3, 7]])
 
 -- ghc 9.2 needs explicit kinds for "i" and "n"
-overrideDictPositive :: forall (i :: Nat) (n :: Nat) p . p n -> (i GN.<=? n) :~: 'True
+overrideDictPositive :: forall (i :: Nat) (n :: Nat) p. p n -> (i GN.<=? n) :~: 'True
 overrideDictPositive _ = unsafeCoerce Refl
 
 -- | lift a positive number to the typelevel
@@ -1027,7 +1030,7 @@ withN i f
             Refl -> f (Proxy @n)
 
 -- | lift a positive number to the typelevel
-withNMin2 :: Int -> (forall n . (FinC 2 n, FinC 1 n) => Proxy n -> x) -> x
+withNMin2 :: Int -> (forall n. (FinC 2 n, FinC 1 n) => Proxy n -> x) -> x
 withNMin2 i f
   | i < 2 = normalError $ "withNMin2: index must be at least 2:found " ++ show i
   | otherwise =
@@ -1036,9 +1039,9 @@ withNMin2 i f
           case overrideDictPositive @1 pn of
             Refl ->
               case overrideDictPositive @2 pn of
-                 Refl -> f (Proxy @n)
+                Refl -> f (Proxy @n)
 
-withNMin3 :: Int -> (forall n . (FinC 3 n, FinC 2 n, FinC 1 n) => Proxy n -> x) -> x
+withNMin3 :: Int -> (forall n. (FinC 3 n, FinC 2 n, FinC 1 n) => Proxy n -> x) -> x
 withNMin3 i f
   | i < 3 = normalError $ "withNMin3: index must be at least 3:found " ++ show i
   | otherwise =
@@ -1062,4 +1065,3 @@ withN3 i j k f = withN i $ \p1 -> withN j $ \p2 -> withN k $ \p3 -> f p1 p2 p3
 -- | lift four positive numbers to the typelevel
 withN4 :: Int -> Int -> Int -> Int -> (forall n m p q. (FinC 1 n, FinC 1 m, FinC 1 p, FinC 1 q) => Proxy n -> Proxy m -> Proxy p -> Proxy q -> x) -> x
 withN4 i j k l f = withN i $ \p1 -> withN j $ \p2 -> withN k $ \p3 -> withN l $ \p4 -> f p1 p2 p3 p4
-

@@ -74,7 +74,7 @@ import qualified Data.List.NonEmpty as N
 import Data.Pos
 import Data.Proxy
 import qualified GHC.TypeLits as GL
-import GHC.TypeNats (Nat,KnownNat)
+import GHC.TypeNats (KnownNat, Nat)
 import qualified GHC.TypeNats as GN
 import Primus.Error
 import Primus.Fold
@@ -135,7 +135,8 @@ type i <! n =
 
 -- | constraint for positive numbers
 type LTEQC :: Nat -> Nat -> Constraint
-class (KnownNat i, KnownNat n) => LTEQC i n where
+class (KnownNat i, KnownNat n) => LTEQC i n
+
 instance
   ( KnownNat i
   , KnownNat n
